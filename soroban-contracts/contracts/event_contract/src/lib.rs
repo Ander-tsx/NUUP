@@ -17,13 +17,13 @@ pub enum EventStatus {
 #[derive(Clone, Debug)]
 #[contracttype]
 pub struct EventData {
-    pub recruiter: Address,
-    pub prize: i128,
-    pub category: Symbol,
+    pub recruiter: Address,    // Cuenta del reclutador
+    pub prize: i128,           // Premio propuesto
+    pub category: Symbol,      // Categoría del evento
     pub deadline_submit: u64,  // Timestamp límite para enviar entregas
     pub deadline_select: u64,  // Timestamp límite para seleccionar ganadores
-    pub status: EventStatus,
-    pub applicants: Vec<Address>,
+    pub status: EventStatus,   // Estado actual del evento
+    pub applicants: Vec<Address>,   // Cuentas de los aplicantes
     pub submissions: Map<Address, BytesN<32>>, // freelancer → hash del entregable
 }
 
@@ -37,6 +37,7 @@ pub enum DataKey {
     ReputationAddr,   // Address del contrato reputation_ledger
     Event(u64),       // event_id → EventData
     Counter,          // Auto-incrementable para IDs de eventos
+    PlatformAddr,     // Plataforma a la que se le va la comisión
 }
 
 // ─── Contract ───────────────────────────────────────────────────────────────
@@ -49,16 +50,22 @@ impl EventContract {
     // ── Inicialización ──────────────────────────────────────────────────
 
     /// Configura admin, token de pago, y dirección del contrato de reputación.
-    pub fn initialize(env: Env, admin: Address, token: Address, reputation_addr: Address) {
+    pub fn initialize(env: Env, admin: Address, token: Address, reputation_addr: Address, platform_addr: Address) {
+        // No puede haber dos admins
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("already initialized");
         }
         admin.require_auth();
+
+        // Seteo de las clasves del contrato
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage()
             .instance()
             .set(&DataKey::ReputationAddr, &reputation_addr);
+        env.storage()
+            .instance()
+            .set(&DataKey::PlatformAddr, &platform_addr);
         env.storage().instance().set(&DataKey::Counter, &0u64);
     }
 
@@ -202,6 +209,11 @@ impl EventContract {
             panic!("event is not open");
         }
 
+        let now = env.ledger().timestamp();
+        if now < event.deadline_submit {
+            panic!("cannot select winners before submission deadline");
+        }
+
         if winners.is_empty() {
             panic!("must select at least one winner");
         }
@@ -215,9 +227,22 @@ impl EventContract {
         }
 
         // Distribuir premio equitativamente
+        let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token_addr);
-        let prize_per_winner = event.prize / (winners.len() as i128);
+
+        // Cobrar comisión muehehehehhehehehe
+        let commission = event.prize / 10; // 10%
+        let payout = event.prize - commission;
+        let prize_per_winner = payout / (winners.len() as i128);
+        
+
+        //Enviar la comisión ijijijiji
+        token_client.transfer(
+            &env.current_contract_address(),
+            &platform,
+            &commission,
+        );
 
         for i in 0..winners.len() {
             let winner = winners.get(i).unwrap();
@@ -254,6 +279,38 @@ impl EventContract {
             );
         }
 
+        // Para los no ganadores se les premia un tantito
+        let delta_rep_no_winners = 1;
+
+        for i in 0..event.applicants.len() {
+            let applicant = event.applicants.get(i).unwrap();
+
+            // Saltar si es ganador
+            let mut is_winner = false;
+            for j in 0..winners.len() {
+                if applicant == winners.get(j).unwrap() {
+                    is_winner = true;
+                    break;
+                }
+            }
+            if is_winner {
+                continue;
+            }
+
+            // Dar reputación mínima
+            env.invoke_contract::<()>(
+                &reputation_addr,
+                &Symbol::new(&env, "add_reputation"),
+                (
+                    admin.clone(),
+                    applicant,
+                    event.category.clone(),
+                    delta_rep_no_winners,
+                )
+                    .into_val(&env),
+            );
+        }
+
         event.status = EventStatus::Resolved;
         env.storage()
             .persistent()
@@ -281,12 +338,27 @@ impl EventContract {
         }
 
         // Devolver fondos al reclutador
+    
+        // Cobrar comisión muehehehehhehehehe
+        let commission = event.prize / 10; // 10%
+        let payout = event.prize - commission;
+
+        let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token_addr);
+
+        // Transferir comisión a la plataforma muehehehehe
+        token_client.transfer(
+            &env.current_contract_address(),
+            &platform,
+            &commission,
+        );
+
+        // Devolver el 90% al reclutador
         token_client.transfer(
             &env.current_contract_address(),
             &event.recruiter,
-            &event.prize,
+            &payout,
         );
 
         event.status = EventStatus::Closed;
