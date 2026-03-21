@@ -4,6 +4,7 @@ const eventSchema = new mongoose.Schema({
   recruiter_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
   description: { type: String, required: true },
+  rules: { type: String, default: '' },
   category_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   prize_amount: { type: Number, required: true },
   max_winners: { type: Number, default: 1 },

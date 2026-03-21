@@ -2,11 +2,12 @@ const Conversation = require('../models/Conversation');
 
 const createConversation = async (req, res) => {
   try {
-    const { to_user_id, project_id } = req.body;
+    const { to_user_id, project_id, event_id } = req.body;
     
     // Check if conversation exists
     const existing = await Conversation.findOne({
       project_id: project_id || null,
+      event_id: event_id || null,
       $or: [
         { user1_id: req.userId, user2_id: to_user_id },
         { user1_id: to_user_id, user2_id: req.userId }
@@ -18,7 +19,8 @@ const createConversation = async (req, res) => {
     const newConversation = new Conversation({
       user1_id: req.userId,
       user2_id: to_user_id,
-      project_id: project_id || null
+      project_id: project_id || null,
+      event_id: event_id || null
     });
 
     const savedConversation = await newConversation.save();

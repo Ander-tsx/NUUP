@@ -5,6 +5,7 @@ const notificationSchema = new mongoose.Schema({
   type: { type: String, enum: ['event', 'project', 'payment', 'dispute', 'system'], required: true },
   title: { type: String, required: true },
   body: { type: String, required: true },
+  reference_id: { type: mongoose.Schema.Types.ObjectId, default: null },
   read: { type: Boolean, default: false }
 }, { timestamps: { createdAt: 'created_at', updatedAt: false } });
 
