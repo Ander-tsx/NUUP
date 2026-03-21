@@ -10,19 +10,29 @@ export function formatMXN(amount: number): string {
   }).format(amount);
 }
 
+export function isValidDate(dateString: string | undefined | null): boolean {
+  if (!dateString) return false;
+  const d = new Date(dateString);
+  return !isNaN(d.getTime());
+}
+
 export function formatDate(dateString: string): string {
+  if (!isValidDate(dateString)) return '-';
   return format(new Date(dateString), "d 'de' MMM, yyyy", { locale: es });
 }
 
 export function formatDateShort(dateString: string): string {
+  if (!isValidDate(dateString)) return '-';
   return format(new Date(dateString), 'dd/MM/yyyy', { locale: es });
 }
 
 export function formatRelative(dateString: string): string {
+  if (!isValidDate(dateString)) return '-';
   return formatDistanceToNow(new Date(dateString), { addSuffix: true, locale: es });
 }
 
 export function formatTime(dateString: string): string {
+  if (!isValidDate(dateString)) return '-';
   return format(new Date(dateString), 'HH:mm', { locale: es });
 }
 

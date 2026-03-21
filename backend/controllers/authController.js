@@ -52,7 +52,7 @@ const login = async (req, res) => {
     const accessToken = jwt.sign(
       { id: user._id, role: user.role }, 
       process.env.JWT_SECRET || 'fallback_secret', 
-      { expiresIn: "15m" } // Short-lived access token
+      { expiresIn: "7d" } // Extended for hackathon
     );
 
     const refreshTokenString = crypto.randomBytes(40).toString('hex');
@@ -118,7 +118,7 @@ const refresh = async (req, res) => {
   const accessToken = jwt.sign(
     { id: user._id, role: user.role }, 
     process.env.JWT_SECRET || 'fallback_secret', 
-    { expiresIn: "15m" }
+    { expiresIn: "7d" }
   );
 
   res.cookie("accessToken", accessToken, { httpOnly: true, secure: process.env.NODE_ENV === "production" })

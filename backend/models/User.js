@@ -14,11 +14,10 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password_hash')) return next();
+userSchema.pre('save', async function() {
+  if (!this.isModified('password_hash')) return;
   const salt = await bcrypt.genSalt(10);
   this.password_hash = await bcrypt.hash(this.password_hash, salt);
-  next();
 });
 
 module.exports = mongoose.model('User', userSchema);

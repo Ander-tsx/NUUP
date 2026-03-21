@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,6 +11,7 @@ import Navbar from '@/components/layout/Navbar';
 import Card from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
+import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
 import { formatMXN } from '@/lib/utils';
 import { sileo } from 'sileo';
@@ -30,6 +31,11 @@ type EventForm = z.infer<typeof eventSchema>;
 export default function CreateEventPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
+  }, []);
 
   const {
     register,
@@ -84,9 +90,10 @@ export default function CreateEventPage() {
                 error={errors.description?.message}
                 {...register('description')}
               />
-              <Input
-                label="ID de categoría"
-                placeholder="ID de la categoría"
+              <Select
+                label="Categoría"
+                placeholder="Selecciona una categoría"
+                options={categories.map((c) => ({ value: c._id, label: c.name }))}
                 error={errors.category_id?.message}
                 {...register('category_id')}
               />

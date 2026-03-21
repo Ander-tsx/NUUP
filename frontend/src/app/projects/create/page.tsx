@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,6 +12,7 @@ import Navbar from '@/components/layout/Navbar';
 import Card from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
+import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
 import { formatMXN } from '@/lib/utils';
 import { sileo } from 'sileo';
@@ -40,6 +41,11 @@ function CreateProjectContent() {
   const searchParams = useSearchParams();
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
+  }, []);
 
   const prefilledFreelancer = searchParams.get('freelancer_id') || '';
 
@@ -98,9 +104,10 @@ function CreateProjectContent() {
                 error={errors.freelancer_id?.message}
                 {...register('freelancer_id')}
               />
-              <Input
-                label="ID de categoría"
-                placeholder="ID de la categoría"
+              <Select
+                label="Categoría"
+                placeholder="Selecciona una categoría"
+                options={categories.map((c) => ({ value: c._id, label: c.name }))}
                 error={errors.category_id?.message}
                 {...register('category_id')}
               />

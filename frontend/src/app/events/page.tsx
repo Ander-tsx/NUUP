@@ -21,6 +21,11 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -39,7 +44,7 @@ export default function EventsPage() {
   }, [categoryFilter]);
 
   const filtered = events.filter((e) =>
-    e.title.toLowerCase().includes(search.toLowerCase())
+    (e.title || '').toLowerCase().includes((search || '').toLowerCase())
   );
 
   return (
@@ -85,6 +90,11 @@ export default function EventsPage() {
               className="border border-zinc-200 bg-white rounded-lg px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 transition-all duration-150"
             >
               <option value="">Todas las categorías</option>
+              {categories.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </div>
 

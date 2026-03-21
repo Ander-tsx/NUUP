@@ -37,6 +37,7 @@ const messageRoutes = require('./routes/messageRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const disputeRoutes = require('./routes/disputeRoutes');
 const reputationRoutes = require('./routes/reputationRoutes');
+const categoryRoutes = require('./routes/categoryRoutes');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -48,6 +49,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/wallets', walletRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/reputation', reputationRoutes);
+app.use('/api/categories', categoryRoutes);
 
 app.get('/api', (req, res) => {
   res.send('ProofWork API is running...');
