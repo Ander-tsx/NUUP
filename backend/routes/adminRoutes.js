@@ -28,9 +28,13 @@ router.post('/backfill-freelancers', async (req, res) => {
       // Get their profile for skills
       const profile = await FreelancerProfile.findOne({ user_id: user._id });
 
-      // Total reputation across all categories
+      // Total reputation across all categories + which categories they have rep in
       const reputations = await Reputation.find({ user_id: user._id });
       const totalReputation = reputations.reduce((sum, r) => sum + r.score, 0);
+      // categories = array of category_id ObjectIds where they have reputation
+      const earnedCategories = reputations
+        .filter(r => r.score > 0)
+        .map(r => r.category_id);
 
       // Completed projects count
       const completedProjects = await Project.countDocuments({
@@ -38,7 +42,7 @@ router.post('/backfill-freelancers', async (req, res) => {
         status: 'completed',
       });
 
-      // Events won
+      // Events won → use as rating factor
       const eventsWon = await EventParticipant.countDocuments({
         freelancer_id: user._id,
         status: 'winner',
@@ -47,6 +51,7 @@ router.post('/backfill-freelancers', async (req, res) => {
       const indexData = {
         user_id: user._id,
         skills: profile?.skills || [],
+        categories: earnedCategories,
         reputation_score: totalReputation,
         completed_projects: completedProjects,
         rating: eventsWon > 0 ? Math.min(5, 3 + eventsWon * 0.5) : 0,

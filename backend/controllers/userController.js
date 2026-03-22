@@ -165,10 +165,15 @@ const getOnChainProfile = async (req, res) => {
  */
 const searchFreelancers = async (req, res) => {
   try {
-    const { skills, min_reputation, min_projects, sort_by, page = 1, limit = 20 } = req.query;
+    const { skills, category_id, min_reputation, min_projects, sort_by, page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     let query = {};
+
+    // Filter by reputation category (category_id in their categories array)
+    if (category_id) {
+      query.categories = category_id;
+    }
 
     // Search by skills (text search)
     if (skills) {
