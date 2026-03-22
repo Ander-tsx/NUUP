@@ -203,6 +203,66 @@ async function fundTestnetAccount(stellarAddress) {
   }
 }
 
+/**
+ * Sends a real XLM payment on the Stellar network (testnet or mainnet).
+ * Used for escrow: recruiter → platform account.
+ *
+ * @param {string} senderSecret   Raw Stellar secret key (S...)
+ * @param {string} destinationPubKey  Stellar public key of recipient (G...)
+ * @param {string|number} amount  Amount of XLM to send (as string e.g. "100.0000000")
+ * @param {string} memo           Optional memo text
+ * @returns {Promise<string>}     Transaction hash on success
+ */
+async function sendXLMPayment(senderSecret, destinationPubKey, amount, memo = '') {
+  const { Keypair: KP, TransactionBuilder: TB, Networks, Operation, Asset, Memo } = require('@stellar/stellar-sdk');
+
+  const isTestnet = process.env.NETWORK !== 'mainnet';
+  const horizonUrl = isTestnet ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org';
+  const networkPassphrase = isTestnet ? Networks.TESTNET : Networks.PUBLIC;
+
+  const senderKeypair = KP.fromSecret(senderSecret);
+
+  // Load account sequence from Horizon
+  const accountRes = await fetch(`${horizonUrl}/accounts/${senderKeypair.publicKey()}`);
+  if (!accountRes.ok) throw new Error(`Account not found on Stellar: ${senderKeypair.publicKey()}`);
+  const accountData = await accountRes.json();
+
+  const { Account } = require('@stellar/stellar-sdk');
+  const account = new Account(senderKeypair.publicKey(), accountData.sequence);
+
+  const formattedAmount = parseFloat(amount).toFixed(7);
+
+  const txBuilder = new TB(account, {
+    fee: '100',
+    networkPassphrase,
+  })
+    .addOperation(Operation.payment({
+      destination: destinationPubKey,
+      asset: Asset.native(),
+      amount: formattedAmount,
+    }))
+    .setTimeout(30);
+
+  if (memo) txBuilder.addMemo(Memo.text(memo.slice(0, 28)));
+
+  const tx = txBuilder.build();
+  tx.sign(senderKeypair);
+
+  const submitRes = await fetch(`${horizonUrl}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `tx=${encodeURIComponent(tx.toXDR())}`,
+  });
+  const submitData = await submitRes.json();
+
+  if (!submitRes.ok) {
+    const resultCodes = submitData?.extras?.result_codes;
+    throw new Error(`Stellar tx failed: ${JSON.stringify(resultCodes || submitData)}`);
+  }
+
+  return submitData.hash;
+}
+
 module.exports = {
     submitContractCall,
     distributeEventPrize,
@@ -215,4 +275,5 @@ module.exports = {
     getAccountBalances,
     accountExists,
     fundTestnetAccount,
+    sendXLMPayment,
 };

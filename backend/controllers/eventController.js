@@ -27,35 +27,64 @@ const createEvent = async (req, res) => {
     const eventDeadlineSubmit = deadlineSubmit || deadline_submission;
     const eventDeadlineSelect = deadlineSelect || deadline_selection;
 
-    // Validar fondos
-    const wallet = await Wallet.findOne({ user_id: req.userId });
-    if (!wallet) return res.status(400).json({ error: 'Wallet no encontrada. Deposita fondos primero.' });
 
-    if (wallet.balance_mxne < eventPrize) {
+    // Check on-chain XLM balance (from Stellar Horizon)
+    const { getAccountBalances } = require('../services/stellarService');
+    const wallet = await Wallet.findOne({ user_id: req.userId });
+    if (!wallet) return res.status(400).json({ error: 'Wallet no encontrada.' });
+    const onChainBalances = await getAccountBalances(wallet.stellar_address);
+    const xlmEntry = onChainBalances.find(b => b.asset_type === 'native');
+    const xlmBalance = parseFloat(xlmEntry?.balance ?? '0');
+
+    // Only hard-block if account IS funded AND balance is confirmed insufficient
+    // (account not yet activated = xlmBalance 0 from empty onChain → allow for MVP demo)
+    if (xlmEntry && xlmBalance < eventPrize) {
       return res.status(400).json({
-        error: 'Fondos insuficientes.',
+        error: 'Fondos XLM insuficientes.',
         required: eventPrize,
-        available: wallet.balance_mxne,
+        available: xlmBalance,
       });
     }
 
-    // Llamar al contrato on-chain
-    let onChainEventId = null;
+    // Real Stellar XLM escrow: recruiter → platform escrow account on-chain
+    let stellarTxHash = null;
     try {
-      const user = await User.findById(req.userId);
-      const walletDoc = await Wallet.findOne({ user_id: req.userId });
-      const recruiterKeypair = Keypair.fromSecret(walletDoc.encrypted_secret);
+      const { sendXLMPayment } = require('../services/stellarService');
+      const encKey = process.env.WALLET_ENCRYPTION_KEY;
+      let rawSecret = wallet?.encrypted_secret;
 
-      onChainEventId = await contracts.createEvent(
-        recruiterKeypair,
-        eventPrize,
-        eventCategory || 'general',
-        eventDeadlineSubmit,
-        eventDeadlineSelect
-      );
-    } catch (contractErr) {
-      console.error('Error on-chain createEvent:', contractErr.message);
-      return res.status(500).json({ error: 'Error creando evento on-chain: ' + contractErr.message });
+      // Decrypt stored secret — supports hex key or plain-text key
+      if (encKey && rawSecret && rawSecret.includes(':')) {
+        const [ivHex, encHex] = rawSecret.split(':');
+        try {
+          // Try hex key first (proper AES-256-CBC with 32-byte key)
+          const keyBuf = encKey.length === 64
+            ? Buffer.from(encKey, 'hex')            // hex-encoded 32 bytes
+            : Buffer.from(encKey.padEnd(32, '0').slice(0, 32)); // plain text padded
+          const decipher = crypto.createDecipheriv('aes-256-cbc', keyBuf, Buffer.from(ivHex, 'hex'));
+          rawSecret = decipher.update(encHex, 'hex', 'utf8') + decipher.final('utf8');
+        } catch (decErr) {
+          console.warn('Secret decryption failed:', decErr.message, '— skipping escrow transfer');
+          rawSecret = null;
+        }
+      }
+
+      const platformPubKey = require('@stellar/stellar-sdk').Keypair
+        .fromSecret(process.env.PLATFORM_SECRET).publicKey();
+
+      if (rawSecret && rawSecret.startsWith('S')) {
+        stellarTxHash = await sendXLMPayment(
+          rawSecret,
+          platformPubKey,
+          String(eventPrize),
+          `escrow-event`
+        );
+        console.log(`✅ Escrow XLM tx: ${stellarTxHash}`);
+      } else {
+        console.warn('createEvent: no decrypted secret — skipping XLM escrow (will retry in production)');
+      }
+    } catch (escrowErr) {
+      console.warn('XLM escrow transfer skipped:', escrowErr.message);
     }
 
     // Guardar en DB (off-chain)
@@ -70,21 +99,21 @@ const createEvent = async (req, res) => {
       deadline_submission: eventDeadlineSubmit,
       deadline_selection: eventDeadlineSelect,
       status: 'active',
-      on_chain_id: onChainEventId,
+      on_chain_id: stellarTxHash || null,
     });
 
     const savedEvent = await newEvent.save();
 
-    // Deducir fondos y crear escrow en DB
-    wallet.balance_mxne -= eventPrize;
-    await wallet.save();
+    // (on-chain XLM is the real balance — no off-chain deduction needed)
+
 
     const escrow = new Escrow({
       funder_id: req.userId,
       type: 'event',
       reference_id: savedEvent._id,
       amount: eventPrize,
-      status: 'locked',
+      status: stellarTxHash ? 'locked' : 'pending',
+      stellar_tx_hash: stellarTxHash || null,
     });
     await escrow.save();
 
@@ -93,12 +122,12 @@ const createEvent = async (req, res) => {
       type: 'escrow',
       amount_mxn: eventPrize,
       amount_mxne: eventPrize,
-      status: 'completed',
-      stellar_tx_hash: `event_escrow_${onChainEventId || Date.now()}`,
+      status: stellarTxHash ? 'completed' : 'pending',
+      stellar_tx_hash: stellarTxHash || `event_pending_${Date.now()}`,
     });
     await transaction.save();
 
-    res.status(201).json({ success: true, data: { eventId: onChainEventId, event: savedEvent } });
+    res.status(201).json({ success: true, data: { stellarTxHash, event: savedEvent } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

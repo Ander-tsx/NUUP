@@ -96,4 +96,35 @@ router.get('/status', async (req, res) => {
   }
 });
 
+/**
+ * POST /admin/seed-categories
+ * Upserts the 5 platform categories. Safe to run multiple times.
+ */
+router.post('/seed-categories', async (req, res) => {
+  try {
+    const Category = require('../models/Category');
+    const categories = [
+      { name: 'Software', slug: 'software', description: 'Desarrollo de software, apps y sistemas' },
+      { name: 'Marketing', slug: 'marketing', description: 'Marketing digital, SEO, redes sociales y campañas' },
+      { name: 'Diseño digital', slug: 'diseno-digital', description: 'UI/UX, ilustración, branding y gráficos digitales' },
+      { name: 'Edición de video', slug: 'edicion-video', description: 'Edición, motion graphics y producción audiovisual' },
+      { name: 'Edición de fotografía', slug: 'edicion-fotografia', description: 'Retoque fotográfico, composición y edición de imágenes' },
+    ];
+
+    const results = await Promise.all(
+      categories.map(cat =>
+        Category.findOneAndUpdate(
+          { name: cat.name },
+          { $set: cat },
+          { upsert: true, new: true }
+        )
+      )
+    );
+
+    res.status(200).json({ message: `${results.length} categorías seeded.`, categories: results.map(c => c.name) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
