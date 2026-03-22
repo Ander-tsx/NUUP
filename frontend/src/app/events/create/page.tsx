@@ -58,7 +58,7 @@ export default function CreateEventPage() {
     try {
       const res = await api.post('/events', { ...data, status: 'active' });
       sileo.success({ title: 'Evento creado', description: 'Tu evento está activo' });
-      router.push(`/events/${res.data._id}`);
+      router.push(`/events/${res.data.data.event._id}`);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error al crear el evento';
       setBackendError(msg);

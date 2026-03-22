@@ -51,15 +51,11 @@ function CreateProjectContent() {
     }).catch(() => {});
 
     // Cargar balance XLM on-chain real
-    api.get('/wallets/balance')
+    api.get('/wallets/on-chain-balance')
       .then((res) => {
-        // el endpoint devuelve balance_xlm o los on_chain_balances
-        const b = res.data?.data ?? res.data;
-        const xlm = b?.balance_xlm
-          ?? b?.on_chain_balances?.find((x: { asset_type: string; balance: string }) => x.asset_type === 'native')?.balance
-          ?? b?.balance_mxne  // fallback si el endpoint aún devuelve mxne
-          ?? 0;
-        setXlmBalance(parseFloat(String(xlm)));
+        const balances = res.data?.on_chain_balances ?? [];
+        const xlmEntry = balances.find((x: { asset_type: string; balance: string }) => x.asset_type === 'native');
+        setXlmBalance(parseFloat(xlmEntry?.balance ?? '0'));
       })
       .catch(() => setXlmBalance(0));
   }, []);

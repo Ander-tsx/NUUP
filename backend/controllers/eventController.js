@@ -142,6 +142,7 @@ const getEvents = async (req, res) => {
     const query = {};
     if (req.query.status) query.status = req.query.status;
     if (req.query.category_id) query.category_id = req.query.category_id;
+    if (req.query.recruiter_id) query.recruiter_id = req.query.recruiter_id;
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;

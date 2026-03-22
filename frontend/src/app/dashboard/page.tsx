@@ -26,16 +26,20 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchAll = async () => {
       try {
+        const eventsUrl = user?.role === 'recruiter' && user?._id
+          ? `/events?recruiter_id=${user._id}` : '/events';
         const [walletRes, eventsRes, projectsRes] = await Promise.allSettled([
-          api.get('/wallets'), api.get('/events'), api.get('/projects'),
+          api.get('/wallets'), api.get(eventsUrl), api.get('/projects'),
         ]);
         if (walletRes.status === 'fulfilled') setWallet(walletRes.value.data);
         if (eventsRes.status === 'fulfilled') {
-          const d = eventsRes.value.data;
+          const raw = eventsRes.value.data;
+          const d = raw?.data ?? raw;
           setEvents((Array.isArray(d) ? d : []).slice(0, 4));
         }
         if (projectsRes.status === 'fulfilled') {
-          const d = projectsRes.value.data;
+          const raw = projectsRes.value.data;
+          const d = raw?.data ?? raw;
           setProjects((Array.isArray(d) ? d : []).slice(0, 4));
         }
         if (user) {
