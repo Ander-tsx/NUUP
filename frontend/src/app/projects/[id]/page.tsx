@@ -56,6 +56,36 @@ export default function ProjectDetailPage() {
     setActionLoading(false);
   };
 
+  const handleAccept = async () => {
+    setActionLoading(true);
+    const promise = api.post(`/projects/${params.id}/accept`);
+    sileo.promise(promise, {
+      loading: { title: 'Aceptando propuesta...' },
+      success: { title: 'Propuesta aceptada', description: 'El proyecto está activo' },
+      error: { title: 'Error al aceptar' },
+    });
+    try {
+      await promise;
+      fetchProject();
+    } catch {}
+    setActionLoading(false);
+  };
+
+  const handleApprove = async () => {
+    setActionLoading(true);
+    const promise = api.post(`/projects/${params.id}/approve`);
+    sileo.promise(promise, {
+      loading: { title: 'Aprobando entrega...' },
+      success: { title: 'Entrega aprobada', description: 'Pago liberado al freelancer' },
+      error: { title: 'Error al aprobar' },
+    });
+    try {
+      await promise;
+      fetchProject();
+    } catch {}
+    setActionLoading(false);
+  };
+
   const handleDeliver = async () => {
     if (!fileUrl) return;
     setActionLoading(true);
@@ -220,7 +250,7 @@ export default function ProjectDetailPage() {
                 <div className="space-y-2">
                   {/* Freelancer actions */}
                   {isFreelancer && project.status === 'proposed' && (
-                    <Button className="w-full" onClick={() => updateStatus('active')} loading={actionLoading}>
+                    <Button className="w-full" onClick={handleAccept} loading={actionLoading}>
                       Aceptar propuesta
                     </Button>
                   )}
@@ -238,7 +268,7 @@ export default function ProjectDetailPage() {
                   {/* Recruiter actions */}
                   {isRecruiter && project.status === 'review' && (
                     <>
-                      <Button className="w-full" onClick={() => updateStatus('completed')} loading={actionLoading}>
+                      <Button className="w-full" onClick={handleApprove} loading={actionLoading}>
                         Aprobar entrega
                       </Button>
                       {!project.correction_used && (

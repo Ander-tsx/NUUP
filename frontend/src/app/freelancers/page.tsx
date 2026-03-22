@@ -1,66 +1,56 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import api from '@/lib/api';
 import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Navbar from '@/components/layout/Navbar';
 import FreelancerCard from '@/components/freelancers/FreelancerCard';
-import PendingBanner from '@/components/ui/PendingBanner';
-import { Search } from 'lucide-react';
+import Spinner from '@/components/ui/Spinner';
+import EmptyState from '@/components/ui/EmptyState';
+import { Search, Users } from 'lucide-react';
+import type { SearchFreelancer } from '@/types';
 
-// No search endpoint exists — using mock data
-const mockFreelancers = [
-  {
-    _id: 'fl1',
-    username: 'Ana López',
-    title: 'Desarrolladora full-stack',
-    reputations: [
-      { category: 'Desarrollo web', score: 120 },
-      { category: 'Diseño UX', score: 45 },
-    ],
-  },
-  {
-    _id: 'fl2',
-    username: 'Miguel Torres',
-    title: 'Redactor creativo',
-    reputations: [
-      { category: 'Redacción', score: 95 },
-      { category: 'Copywriting', score: 62 },
-    ],
-  },
-  {
-    _id: 'fl3',
-    username: 'Laura Vega',
-    title: 'Ilustradora digital',
-    reputations: [
-      { category: 'Ilustración', score: 78 },
-      { category: 'Diseño gráfico', score: 54 },
-    ],
-  },
-  {
-    _id: 'fl4',
-    username: 'Carlos Méndez',
-    title: 'Diseñador gráfico senior',
-    reputations: [
-      { category: 'Diseño gráfico', score: 85 },
-      { category: 'Ilustración', score: 42 },
-    ],
-  },
+const SKILL_CATEGORIES = [
+  'Todos', 'JavaScript', 'React', 'Node.js', 'Python', 'Diseño UX',
+  'Diseño gráfico', 'Redacción', 'Marketing', 'Blockchain',
 ];
-
-const categories = ['Todos', 'Desarrollo web', 'Diseño gráfico', 'Redacción', 'Ilustración', 'Copywriting', 'Diseño UX'];
 
 export default function FreelancersPage() {
   const [search, setSearch] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [selectedSkill, setSelectedSkill] = useState('Todos');
   const [minRep, setMinRep] = useState(0);
+  const [freelancers, setFreelancers] = useState<SearchFreelancer[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = mockFreelancers.filter((f) => {
-    const matchesSearch = f.username.toLowerCase().includes(search.toLowerCase()) ||
-      f.title.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = selectedCategory === 'Todos' ||
-      f.reputations.some((r) => r.category === selectedCategory);
-    const matchesRep = f.reputations.some((r) => r.score >= minRep);
-    return matchesSearch && matchesCategory && matchesRep;
+  const fetchFreelancers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedSkill !== 'Todos') params.set('skills', selectedSkill);
+      if (minRep > 0) params.set('min_reputation', String(minRep));
+      params.set('limit', '50');
+
+      const res = await api.get(`/users/search/freelancers?${params.toString()}`);
+      const data = res.data;
+      setFreelancers(Array.isArray(data?.freelancers) ? data.freelancers : Array.isArray(data) ? data : []);
+    } catch {
+      setFreelancers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedSkill, minRep]);
+
+  useEffect(() => {
+    fetchFreelancers();
+  }, [fetchFreelancers]);
+
+  // Client-side name filter (search is fast, no need for re-fetch)
+  const filtered = freelancers.filter((f) => {
+    if (!search) return true;
+    const name = f.user_id?.username || '';
+    const title = f.title || '';
+    const q = search.toLowerCase();
+    return name.toLowerCase().includes(q) || title.toLowerCase().includes(q);
   });
 
   return (
@@ -68,9 +58,7 @@ export default function FreelancersPage() {
       <Navbar />
       <div className="pt-14 min-h-screen bg-zinc-100">
         <div className="max-w-6xl mx-auto px-4 py-8">
-          <PendingBanner />
-
-          <div className="mt-6 mb-6">
+          <div className="mb-6">
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
               Buscar freelancers
             </h1>
@@ -92,14 +80,14 @@ export default function FreelancersPage() {
               />
             </div>
 
-            {/* Category pills */}
+            {/* Skill pills */}
             <div className="flex flex-wrap gap-2">
-              {categories.map((cat) => (
+              {SKILL_CATEGORIES.map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => setSelectedCategory(cat)}
+                  onClick={() => setSelectedSkill(cat)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border ${
-                    selectedCategory === cat
+                    selectedSkill === cat
                       ? 'bg-zinc-900 text-white border-zinc-900'
                       : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400'
                   }`}
@@ -129,15 +117,21 @@ export default function FreelancersPage() {
           </div>
 
           {/* Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((f) => (
-              <FreelancerCard key={f._id} freelancer={f} />
-            ))}
-          </div>
-
-          {filtered.length === 0 && (
-            <div className="text-center py-16">
-              <p className="text-sm text-zinc-400">No se encontraron resultados</p>
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <Spinner size="lg" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="Sin freelancers"
+              description="No se encontraron freelancers con estos filtros."
+            />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((f) => (
+                <FreelancerCard key={f._id} freelancer={f} />
+              ))}
             </div>
           )}
         </div>

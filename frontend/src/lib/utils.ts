@@ -41,7 +41,8 @@ export function truncateAddress(address: string, chars: number = 6): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
 
-export function getInitials(name: string): string {
+export function getInitials(name: string | null | undefined): string {
+  if (!name) return '?';
   return name
     .split(' ')
     .map((n) => n[0])
@@ -50,11 +51,12 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export function getAvatarColor(name: string): string {
+export function getAvatarColor(name: string | null | undefined): string {
   const colors = [
     '#3F3F46', '#52525B', '#71717A', '#27272A',
     '#44403C', '#57534E', '#78716C', '#292524',
   ];
+  if (!name) return colors[0];
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);

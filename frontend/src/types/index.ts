@@ -201,3 +201,33 @@ export interface Dispute {
   created_at: string;
   updated_at: string;
 }
+
+// ── Notification ──
+export interface Notification {
+  _id: string;
+  user_id: string;
+  type: 'event' | 'project' | 'payment' | 'system';
+  title: string;
+  message: string;
+  reference_id?: string;
+  read: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Search Index ──
+export interface SearchFreelancer {
+  _id: string;
+  user_id: {
+    _id: string;
+    username: string;
+    profile_image?: string;
+    bio?: string;
+    stellar_public_key?: string;
+  };
+  skills: string[];
+  title: string;
+  reputation_score: number;
+  completed_projects: number;
+  rating: number;
+}

@@ -34,13 +34,19 @@ export default function DashboardPage() {
         ]);
 
         if (walletRes.status === 'fulfilled') setWallet(walletRes.value.data);
-        if (eventsRes.status === 'fulfilled') setEvents(eventsRes.value.data.slice(0, 3));
-        if (projectsRes.status === 'fulfilled') setProjects(projectsRes.value.data.slice(0, 3));
+        if (eventsRes.status === 'fulfilled') {
+          const eData = eventsRes.value.data;
+          setEvents((Array.isArray(eData) ? eData : []).slice(0, 3));
+        }
+        if (projectsRes.status === 'fulfilled') {
+          const pData = projectsRes.value.data;
+          setProjects((Array.isArray(pData) ? pData : []).slice(0, 3));
+        }
 
         if (user) {
           try {
             const repRes = await api.get(`/reputation/${user._id}`);
-            setReputations(repRes.data);
+            setReputations(Array.isArray(repRes.data) ? repRes.data : []);
           } catch {}
         }
       } catch {}
