@@ -4,6 +4,7 @@
 const sorobanClient = require('./soroban.client');
 const sorobanHelper = require('./soroban.helper');
 const scvalHelpers = require('./scval.helpers');
+const walletRegistryContract = require('./wallet-registry.contract');
 const reputationContract = require('./reputation.contract');
 const eventContract = require('./event.contract');
 const projectContract = require('./project.contract');
@@ -22,13 +23,19 @@ module.exports = {
   // --- Conversores ScVal ---
   ...scvalHelpers,
 
+  // --- WalletRegistry Contract ---
+  isActiveByWallet: walletRegistryContract.isActiveByWallet,
+  getRoleByWallet: walletRegistryContract.getRoleByWallet,
+
   // --- Reputation Contract ---
   initializeReputation: reputationContract.initializeReputation,
   addReputation: reputationContract.addReputation,
+  removeReputation: reputationContract.removeReputation,
   getReputation: reputationContract.getReputation,
   isBanned: reputationContract.isBanned,
 
   // --- Event Contract ---
+  initializeEvent: eventContract.initializeEvent,
   createEvent: eventContract.createEvent,
   applyToEvent: eventContract.applyToEvent,
   submitEntry: eventContract.submitEntry,
@@ -37,6 +44,7 @@ module.exports = {
   getEvent: eventContract.getEvent,
 
   // --- Project Contract ---
+  initializeProject: projectContract.initializeProject,
   createProject: projectContract.createProject,
   acceptProject: projectContract.acceptProject,
   submitDelivery: projectContract.submitDelivery,

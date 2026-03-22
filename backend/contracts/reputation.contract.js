@@ -7,13 +7,18 @@ const { toAddress, toSymbol, toU32 } = require('./scval.helpers');
 
 /**
  * Inicializa el contrato de reputación (solo una vez al desplegar).
+ * Recibe adicionalmente la dirección del WalletRegistry para cross-contract calls
+ * de validación en add_reputation y remove_reputation.
  * @param {Keypair} adminKeypair - Keypair del admin
  */
 async function initializeReputation(adminKeypair) {
   return invokeContract(
     CONTRACT_IDS.reputation,
     'initialize',
-    [toAddress(adminKeypair.publicKey())],
+    [
+      toAddress(adminKeypair.publicKey()),
+      toAddress(CONTRACT_IDS.walletRegistry),
+    ],
     adminKeypair
   );
 }
@@ -29,6 +34,30 @@ async function addReputation(adminKeypair, userPublicKey, category, delta) {
   return invokeContract(
     CONTRACT_IDS.reputation,
     'add_reputation',
+    [
+      toAddress(adminKeypair.publicKey()),
+      toAddress(userPublicKey),
+      toSymbol(category),
+      toU32(delta),
+    ],
+    adminKeypair
+  );
+}
+
+/**
+ * Remueve reputación de un usuario en una categoría específica.
+ * El contrato valida internamente que la wallet esté activa (cross-contract call
+ * a is_active_by_wallet). Incluye guard de underflow: si delta > reputación actual,
+ * el contrato hace panic. Pre-valida con getReputation si necesitas evitar el error.
+ * @param {Keypair} adminKeypair  - Keypair del admin
+ * @param {string}  userPublicKey - Public key del usuario
+ * @param {string}  category      - Categoría (ej: "design", "dev")
+ * @param {number}  delta         - Cantidad de reputación a remover
+ */
+async function removeReputation(adminKeypair, userPublicKey, category, delta) {
+  return invokeContract(
+    CONTRACT_IDS.reputation,
+    'remove_reputation',
     [
       toAddress(adminKeypair.publicKey()),
       toAddress(userPublicKey),
@@ -77,6 +106,7 @@ async function isBanned(callerPublicKey, userPublicKey) {
 module.exports = {
   initializeReputation,
   addReputation,
+  removeReputation,
   getReputation,
   isBanned,
 };

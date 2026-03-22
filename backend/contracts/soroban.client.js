@@ -12,9 +12,10 @@ const server = new rpc.Server(SERVER_URL, { allowHttp: false });
 
 // IDs de contratos desplegados (se leen de variables de entorno)
 const CONTRACT_IDS = {
-  reputation: process.env.REPUTATION_CONTRACT_ID,
-  event:      process.env.EVENT_CONTRACT_ID,
-  project:    process.env.PROJECT_CONTRACT_ID,
+  walletRegistry: process.env.WALLET_REGISTRY_CONTRACT_ID,
+  reputation:     process.env.REPUTATION_CONTRACT_ID,
+  event:          process.env.EVENT_CONTRACT_ID,
+  project:        process.env.PROJECT_CONTRACT_ID,
 };
 
 module.exports = { server, NETWORK_PASSPHRASE, CONTRACT_IDS, BASE_FEE };

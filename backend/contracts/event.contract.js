@@ -8,6 +8,26 @@ const { CONTRACT_IDS } = require('./soroban.client');
 const { toAddress, toI128, toSymbol, toU64, toBytes32, toAddressVec } = require('./scval.helpers');
 
 /**
+ * Inicializa el contrato de eventos (solo una vez al desplegar).
+ * Recibe adicionalmente la dirección del WalletRegistry para validar
+ * actividad y rol en create_event y apply_to_event.
+ * @param {Keypair} adminKeypair - Keypair del admin
+ * @param {string}  tokenAddress - Address del token para escrow
+ */
+async function initializeEvent(adminKeypair, tokenAddress) {
+  return invokeContract(
+    CONTRACT_IDS.event,
+    'initialize',
+    [
+      toAddress(adminKeypair.publicKey()),
+      toAddress(tokenAddress),
+      toAddress(CONTRACT_IDS.walletRegistry),
+    ],
+    adminKeypair
+  );
+}
+
+/**
  * Crea un nuevo evento con premio en escrow.
  * @param {Keypair} recruiterKeypair - Keypair del reclutador
  * @param {number|string} prize      - Premio en stroops/unidades del token
@@ -122,6 +142,7 @@ async function getEvent(callerPublicKey, eventId) {
 }
 
 module.exports = {
+  initializeEvent,
   createEvent,
   applyToEvent,
   submitEntry,

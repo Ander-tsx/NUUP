@@ -8,6 +8,26 @@ const { CONTRACT_IDS } = require('./soroban.client');
 const { toAddress, toI128, toSymbol, toU64, toBytes32, toBool } = require('./scval.helpers');
 
 /**
+ * Inicializa el contrato de proyectos (solo una vez al desplegar).
+ * Recibe adicionalmente la dirección del WalletRegistry para validar
+ * actividad y rol en create_project y accept_project.
+ * @param {Keypair} adminKeypair - Keypair del admin
+ * @param {string}  tokenAddress - Address del token para escrow
+ */
+async function initializeProject(adminKeypair, tokenAddress) {
+  return invokeContract(
+    CONTRACT_IDS.project,
+    'initialize',
+    [
+      toAddress(adminKeypair.publicKey()),
+      toAddress(tokenAddress),
+      toAddress(CONTRACT_IDS.walletRegistry),
+    ],
+    adminKeypair
+  );
+}
+
+/**
  * Crea un nuevo proyecto con escrow de amount + guarantee.
  * @param {Keypair} recruiterKeypair     - Keypair del reclutador
  * @param {string}  freelancerPublicKey  - Public key del freelancer asignado
@@ -190,6 +210,7 @@ async function getProject(callerPublicKey, projectId) {
 }
 
 module.exports = {
+  initializeProject,
   createProject,
   acceptProject,
   submitDelivery,
