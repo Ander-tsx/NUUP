@@ -31,9 +31,10 @@ const server = new SorobanRpc.Server(SERVER_URL, { allowHttp: false });
 
 // IDs de contratos desplegados
 const CONTRACT_IDS = {
-  reputation: process.env.REPUTATION_CONTRACT_ID,
-  event:      process.env.EVENT_CONTRACT_ID,
-  project:    process.env.PROJECT_CONTRACT_ID,
+  walletRegistry: process.env.WALLET_REGISTRY_CONTRACT_ID,
+  reputation:     process.env.REPUTATION_CONTRACT_ID,
+  event:          process.env.EVENT_CONTRACT_ID,
+  project:        process.env.PROJECT_CONTRACT_ID,
 };
 
 module.exports = { server, NETWORK_PASSPHRASE, CONTRACT_IDS, BASE_FEE };
@@ -185,9 +186,78 @@ module.exports = { toAddress, toU64, toI128, toU32, toSymbol, toBytes32, toBool,
 
 ---
 
+## WalletRegistry
+
+> El `WalletRegistry` es el contrato de identidad central de ProofWork. Todos los contratos que requieren validación de usuarios hacen cross-contract calls a este contrato. Asegúrate de que `WALLET_REGISTRY_CONTRACT_ID` esté configurado en tus variables de entorno.
+
+### `is_active_by_wallet` (lectura)
+
+Consulta si una wallet (Address) está activa y registrada en el sistema. Es la función que invocan internamente `EventContract`, `ProjectContract` y `ReputationLedger` en sus cross-contract calls. Puedes usarla directamente desde el backend para pre-validar antes de construir transacciones.
+
+```js
+// services/walletRegistry.service.js
+const { Keypair } = require('@stellar/stellar-sdk');
+const { queryContract } = require('./soroban.helper');
+const { CONTRACT_IDS } = require('./soroban.client');
+const { toAddress } = require('./scval.helpers');
+
+/**
+ * Verifica si una wallet está activa en el WalletRegistry.
+ *
+ * @param {string} callerPublicKey  - Cuenta que paga la simulación (ej: PLATFORM_SECRET)
+ * @param {string} walletPublicKey  - Address a consultar
+ * @returns {Promise<boolean>}
+ */
+async function isActiveByWallet(callerPublicKey, walletPublicKey) {
+  const result = await queryContract(
+    CONTRACT_IDS.walletRegistry,
+    'is_active_by_wallet',
+    [toAddress(walletPublicKey)],
+    callerPublicKey
+  );
+
+  return result?.b() ?? false;
+}
+
+module.exports = { isActiveByWallet };
+```
+
+### `get_role_by_wallet` (lectura)
+
+Retorna el rol del usuario dado su Address. Los contratos lo usan para garantizar que el reclutador tenga rol `Recruiter` y el freelancer tenga rol `Freelancer` antes de operar.
+
+```js
+/**
+ * Obtiene el rol de una wallet en el WalletRegistry.
+ *
+ * @param {string} callerPublicKey  - Cuenta que paga la simulación
+ * @param {string} walletPublicKey  - Address a consultar
+ * @returns {Promise<string>}       - "Recruiter" | "Freelancer" | "Admin" | ...
+ */
+async function getRoleByWallet(callerPublicKey, walletPublicKey) {
+  const result = await queryContract(
+    CONTRACT_IDS.walletRegistry,
+    'get_role_by_wallet',
+    [toAddress(walletPublicKey)],
+    callerPublicKey
+  );
+
+  // El resultado es un ScVal Symbol
+  return result ? result.sym().toString() : null;
+}
+
+module.exports = { isActiveByWallet, getRoleByWallet };
+```
+
+> **Nota:** Aunque los contratos de la plataforma validan actividad y rol de forma automática vía cross-contract call, puedes invocar estas funciones desde el backend para dar feedback al usuario **antes** de construir la transacción y evitar fees innecesarios por un panic en contrato.
+
+---
+
 ## ReputationLedger
 
 ### `initialize`
+
+Ahora recibe adicionalmente la dirección del `WalletRegistry` para poder hacer cross-contract calls de validación en `add_reputation` y `remove_reputation`.
 
 ```js
 // Solo se ejecuta una vez al desplegar. No llamar desde rutas de usuario.
@@ -196,17 +266,25 @@ const { invokeContract } = require('./soroban.helper');
 const { CONTRACT_IDS } = require('./soroban.client');
 const { toAddress } = require('./scval.helpers');
 
+/**
+ * @param {Keypair} adminKeypair - Keypair del administrador
+ */
 async function initializeReputation(adminKeypair) {
   return invokeContract(
     CONTRACT_IDS.reputation,
     'initialize',
-    [toAddress(adminKeypair.publicKey())],
+    [
+      toAddress(adminKeypair.publicKey()),   // admin_addr
+      toAddress(CONTRACT_IDS.walletRegistry), // wallet_registry_addr (nuevo)
+    ],
     adminKeypair
   );
 }
 ```
 
 ### `add_reputation`
+
+El contrato valida internamente que la wallet esté activa y registrada (cross-contract call a `is_active_by_wallet`) antes de acreditar reputación. Si la wallet está desactivada o no existe, el contrato hace panic.
 
 ```js
 async function addReputation(adminKeypair, userPublicKey, category, delta) {
@@ -223,6 +301,28 @@ async function addReputation(adminKeypair, userPublicKey, category, delta) {
   );
 }
 ```
+
+### `remove_reputation`
+
+Al igual que `add_reputation`, el contrato valida actividad de la wallet antes de operar. Además incluye un guard interno que hace panic si `delta > current` para evitar underflow en el contador de reputación.
+
+```js
+async function removeReputation(adminKeypair, userPublicKey, category, delta) {
+  return invokeContract(
+    CONTRACT_IDS.reputation,
+    'remove_reputation',
+    [
+      toAddress(adminKeypair.publicKey()), // caller (admin)
+      toAddress(userPublicKey),
+      toSymbol(category),
+      toU32(delta),
+    ],
+    adminKeypair
+  );
+}
+```
+
+> **Guard de underflow:** Si `delta > reputación actual`, el contrato hace panic con un error descriptivo. Pre-valida el valor actual con `get_reputation` si necesitas evitar el error en contrato.
 
 ### `get_reputation` (lectura)
 
@@ -259,9 +359,29 @@ async function isBanned(callerPublicKey, userPublicKey) {
 
 ## EventContract
 
+### `initialize`
+
+Ahora recibe adicionalmente la dirección del `WalletRegistry` para validar actividad y rol en `create_event` y `apply_to_event`.
+
+```js
+// Solo se ejecuta una vez al desplegar. No llamar desde rutas de usuario.
+async function initializeEvent(adminKeypair, tokenAddress) {
+  return invokeContract(
+    CONTRACT_IDS.event,
+    'initialize',
+    [
+      toAddress(adminKeypair.publicKey()),    // admin_addr
+      toAddress(tokenAddress),               // token_addr
+      toAddress(CONTRACT_IDS.walletRegistry), // wallet_registry_addr (nuevo)
+    ],
+    adminKeypair
+  );
+}
+```
+
 ### `create_event`
 
-El reclutador debe tener fondos suficientes en el token configurado. El `prize` se transfiere al escrow del contrato.
+El contrato valida automáticamente (vía cross-contract call al `WalletRegistry`) que el reclutador esté **activo** y tenga rol **Recruiter** antes de crear el evento. Si alguna validación falla, el contrato hace panic y la transacción revierte.
 
 ```js
 // routes/events.js
@@ -283,6 +403,7 @@ router.post('/events', async (req, res) => {
 
     const recruiterKeypair = Keypair.fromSecret(recruiterSecret);
 
+    // El contrato valida internamente: actividad + rol Recruiter (cross-contract → WalletRegistry)
     const response = await invokeContract(
       CONTRACT_IDS.event,
       'create_event',
@@ -308,12 +429,15 @@ router.post('/events', async (req, res) => {
 
 ### `apply_to_event`
 
+El contrato valida que el freelancer esté **activo** y tenga rol **Freelancer** antes de registrar la aplicación. Esta validación al momento de aplicar es la que garantiza que `submit_entry` no necesite re-validar (la presencia en `applicants` ya es prueba suficiente).
+
 ```js
 router.post('/events/:eventId/apply', async (req, res) => {
   try {
     const { freelancerSecret } = req.body;
     const freelancerKeypair = Keypair.fromSecret(freelancerSecret);
 
+    // El contrato valida internamente: actividad + rol Freelancer (cross-contract → WalletRegistry)
     await invokeContract(
       CONTRACT_IDS.event,
       'apply_to_event',
@@ -334,6 +458,8 @@ router.post('/events/:eventId/apply', async (req, res) => {
 ### `submit_entry`
 
 El `entryHash` debe ser el SHA-256 del entregable, representado como hex de 64 caracteres (32 bytes).
+
+> **Sin re-validación de wallet:** `submit_entry` no vuelve a verificar actividad ni rol. La presencia del freelancer en la lista `applicants` del evento garantiza que fue validado correctamente en el momento de aplicar.
 
 ```js
 const crypto = require('crypto');
@@ -439,7 +565,33 @@ router.get('/events/:eventId', async (req, res) => {
 
 ## ProjectContract
 
+### `initialize`
+
+Ahora recibe adicionalmente la dirección del `WalletRegistry` para validar actividad y rol en `create_project` y `accept_project`.
+
+```js
+// Solo se ejecuta una vez al desplegar. No llamar desde rutas de usuario.
+async function initializeProject(adminKeypair, tokenAddress) {
+  return invokeContract(
+    CONTRACT_IDS.project,
+    'initialize',
+    [
+      toAddress(adminKeypair.publicKey()),    // admin_addr
+      toAddress(tokenAddress),               // token_addr
+      toAddress(CONTRACT_IDS.walletRegistry), // wallet_registry_addr (nuevo)
+    ],
+    adminKeypair
+  );
+}
+```
+
 ### `create_project`
+
+El contrato valida **ambas partes** antes de depositar el escrow:
+- El reclutador debe estar **activo** y tener rol **Recruiter**.
+- El freelancer debe estar **activo** y tener rol **Freelancer**.
+
+Si alguna de las dos validaciones falla, el contrato hace panic y ningún fondo es transferido.
 
 ```js
 // routes/projects.js
@@ -456,6 +608,9 @@ router.post('/projects', async (req, res) => {
 
     const recruiterKeypair = Keypair.fromSecret(recruiterSecret);
 
+    // El contrato valida internamente:
+    //   - reclutador: actividad + rol Recruiter (cross-contract → WalletRegistry)
+    //   - freelancer: actividad + rol Freelancer (cross-contract → WalletRegistry)
     const response = await invokeContract(
       CONTRACT_IDS.project,
       'create_project',
@@ -481,12 +636,16 @@ router.post('/projects', async (req, res) => {
 
 ### `accept_project`
 
+El contrato re-valida la actividad del freelancer en el momento de aceptar. Esto cubre el caso en que el freelancer haya sido desactivado en el `WalletRegistry` entre la creación del proyecto y su aceptación.
+
 ```js
 router.post('/projects/:projectId/accept', async (req, res) => {
   try {
     const { freelancerSecret } = req.body;
     const freelancerKeypair = Keypair.fromSecret(freelancerSecret);
 
+    // El contrato re-valida actividad del freelancer (cross-contract → WalletRegistry).
+    // Protege contra el caso en que el freelancer haya sido desactivado tras la creación.
     await invokeContract(
       CONTRACT_IDS.project,
       'accept_project',
@@ -700,6 +859,7 @@ SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 NETWORK=testnet
 
 # Contratos desplegados
+WALLET_REGISTRY_CONTRACT_ID=C...   # Nuevo: registro central de identidad
 REPUTATION_CONTRACT_ID=C...
 EVENT_CONTRACT_ID=C...
 PROJECT_CONTRACT_ID=C...
