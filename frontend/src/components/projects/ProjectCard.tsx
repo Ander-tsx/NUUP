@@ -4,7 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import Avatar from '@/components/ui/Avatar';
 import Badge, { getStatusVariant } from '@/components/ui/Badge';
-import { formatMXN } from '@/lib/utils';
+import { formatXLM } from '@/lib/utils';
 import { DollarSign } from 'lucide-react';
 import type { Project, User as UserType } from '@/types';
 
@@ -48,7 +48,7 @@ export default function ProjectCard({ project, currentUserId }: ProjectCardProps
 
       <div className="flex items-center gap-1.5">
         <DollarSign className="w-3.5 h-3.5 text-[#2185D5]" />
-        <p className="text-xl font-bold text-white tabular-nums">{formatMXN(project.amount)}</p>
+        <p className="text-xl font-bold text-white tabular-nums">{formatXLM(project.amount)}</p>
       </div>
     </div>
   );

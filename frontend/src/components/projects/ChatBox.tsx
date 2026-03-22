@@ -24,80 +24,109 @@ export default function ChatBox({ projectId, otherUserId, otherUsername }: ChatB
 
   // Get or create conversation
   useEffect(() => {
+    if (!otherUserId) return;
     const getConversation = async () => {
       try {
         const res = await api.post('/conversations', {
           to_user_id: otherUserId,
           project_id: projectId,
         });
-        setConversation(res.data);
+        // Unwrap { success, data: conversation } envelope
+        const conv = res.data?.data ?? res.data;
+        setConversation(conv);
       } catch {}
     };
     getConversation();
   }, [projectId, otherUserId]);
 
-  // Poll messages
+  // Poll messages every 4 seconds
   useEffect(() => {
-    if (!conversation) return;
+    if (!conversation?._id) return;
 
     const fetchMessages = async () => {
       try {
         const res = await api.get(`/messages/${conversation._id}`);
-        setMessages(res.data);
+        // Unwrap envelope
+        const payload = res.data?.data ?? res.data;
+        setMessages(Array.isArray(payload) ? payload : []);
       } catch {}
     };
 
     fetchMessages();
-    const interval = setInterval(fetchMessages, 5000);
+    const interval = setInterval(fetchMessages, 4000);
     return () => clearInterval(interval);
-  }, [conversation]);
+  }, [conversation?._id]);
 
-  // Auto-scroll
+  // Auto-scroll on new messages
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = async () => {
-    if (!newMessage.trim() || !conversation) return;
+    if (!newMessage.trim() || !conversation?._id || sending) return;
     setSending(true);
+    const text = newMessage.trim();
+    setNewMessage(''); // clear input immediately for UX
     try {
       await api.post('/messages', {
         conversation_id: conversation._id,
-        message: newMessage,
+        message: text,
       });
-      setNewMessage('');
-      // Refresh immediately
+      // Refresh messages list
       const res = await api.get(`/messages/${conversation._id}`);
-      setMessages(res.data);
-    } catch {}
+      const payload = res.data?.data ?? res.data;
+      setMessages(Array.isArray(payload) ? payload : []);
+    } catch {
+      // On error restore the text
+      setNewMessage(text);
+    }
     setSending(false);
   };
 
-  return (
-    <div className="flex flex-col h-[400px]">
-      <h3 className="text-base font-semibold text-zinc-900 mb-3">Chat con {otherUsername}</h3>
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
 
-      <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1">
+  return (
+    <div className="flex flex-col h-[420px]">
+      <h3
+        className="text-sm font-semibold mb-3 pb-3"
+        style={{ color: 'var(--text-2)', borderBottom: '1px solid var(--border)' }}
+      >
+        Chat con <span className="text-white">{otherUsername}</span>
+      </h3>
+
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1 min-h-0">
+        {messages.length === 0 && (
+          <p className="text-xs text-center py-8" style={{ color: 'var(--text-3)' }}>
+            Sin mensajes aún. Inicia la conversación.
+          </p>
+        )}
         {messages.map((msg) => {
           const isOwn = msg.sender_id === user?._id;
           return (
-            <div
-              key={msg._id}
-              className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
-            >
-              <div className="flex items-end gap-2 max-w-[75%]">
+            <div key={msg._id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div className="flex items-end gap-2 max-w-[78%]">
                 {!isOwn && <Avatar name={otherUsername} size="sm" />}
                 <div
-                  className={`px-3 py-2 text-sm ${
-                    isOwn
-                      ? 'bg-zinc-900 text-white rounded-2xl rounded-tr-sm'
-                      : 'bg-zinc-100 text-zinc-900 rounded-2xl rounded-tl-sm'
-                  }`}
+                  className="px-3.5 py-2 text-sm rounded-2xl"
+                  style={isOwn ? {
+                    background: 'linear-gradient(135deg, #2185D5, #818cf8)',
+                    color: '#fff',
+                    borderBottomRightRadius: '4px',
+                  } : {
+                    background: 'var(--surface-2)',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderBottomLeftRadius: '4px',
+                  }}
                 >
                   <p>{msg.message}</p>
-                  <p className={`text-[10px] mt-1 ${isOwn ? 'text-white/40' : 'text-zinc-400'}`}>
-                    {formatTime(msg.created_at)}
-                  </p>
+                  <p className="text-[10px] mt-1 opacity-60">{formatTime(msg.created_at)}</p>
                 </div>
               </div>
             </div>
@@ -106,19 +135,27 @@ export default function ChatBox({ projectId, otherUserId, otherUsername }: ChatB
         <div ref={messagesEnd} />
       </div>
 
-      <div className="flex gap-2">
+      {/* Input row */}
+      <div className="flex gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
         <input
           type="text"
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Escribe un mensaje..."
-          className="flex-1 border border-zinc-200 bg-white rounded-lg px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 transition-all duration-150"
+          onKeyDown={handleKeyDown}
+          placeholder="Escribe un mensaje…"
+          disabled={!conversation?._id}
+          className="flex-1 rounded-xl px-3.5 py-2 text-sm outline-none transition-all duration-150"
+          style={{
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+          }}
         />
         <button
           onClick={handleSend}
-          disabled={sending || !newMessage.trim()}
-          className="px-3 py-2 bg-zinc-900 text-white rounded-lg hover:bg-[#81DA47] hover:text-zinc-900 transition-all duration-150 disabled:opacity-40"
+          disabled={sending || !newMessage.trim() || !conversation?._id}
+          className="px-3.5 py-2 rounded-xl transition-all duration-150 disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #2185D5, #818cf8)', color: '#fff' }}
         >
           <Send className="w-4 h-4" />
         </button>

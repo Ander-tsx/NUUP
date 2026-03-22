@@ -23,11 +23,18 @@ const createProject = async (req, res) => {
     if (!wallet) return res.status(400).json({ error: 'Wallet no encontrada.' });
 
     const totalRequired = (amount || 0) + (guarantee || 0);
-    if (wallet.balance_mxne < totalRequired) {
+
+    // ── Verificar balance XLM real en Stellar ──
+    const { getAccountBalances, sendXLMPayment } = require('../services/stellarService');
+    const onChainBalances = await getAccountBalances(wallet.stellar_address);
+    const xlmEntry = onChainBalances.find(b => b.asset_type === 'native');
+    const xlmBalance = parseFloat(xlmEntry?.balance ?? '0');
+
+    if (xlmEntry && xlmBalance < totalRequired) {
       return res.status(400).json({
-        error: 'Fondos insuficientes.',
+        error: 'Fondos XLM insuficientes.',
         required: totalRequired,
-        available: wallet.balance_mxne,
+        available: xlmBalance,
       });
     }
 
@@ -43,7 +50,42 @@ const createProject = async (req, res) => {
       if (freelancerUser) freelancerPK = freelancerUser.stellar_public_key;
     }
 
-    // Llamar al contrato on-chain
+    // ── Enviar XLM real al escrow (cuenta plataforma) ──
+    let stellarTxHash = null;
+    try {
+      const encKey = process.env.WALLET_ENCRYPTION_KEY;
+      let rawSecret = wallet?.encrypted_secret;
+      if (encKey && rawSecret && rawSecret.includes(':')) {
+        const [ivHex, encHex] = rawSecret.split(':');
+        try {
+          const keyBuf = encKey.length === 64
+            ? Buffer.from(encKey, 'hex')
+            : Buffer.from(encKey.padEnd(32, '0').slice(0, 32));
+          const decipher = crypto.createDecipheriv('aes-256-cbc', keyBuf, Buffer.from(ivHex, 'hex'));
+          rawSecret = decipher.update(encHex, 'hex', 'utf8') + decipher.final('utf8');
+        } catch (decErr) {
+          console.warn('Secret decryption failed:', decErr.message, '— skipping escrow transfer');
+          rawSecret = null;
+        }
+      }
+
+      const platformPubKey = Keypair.fromSecret(process.env.PLATFORM_SECRET).publicKey();
+      if (rawSecret && rawSecret.startsWith('S')) {
+        stellarTxHash = await sendXLMPayment(
+          rawSecret,
+          platformPubKey,
+          String(totalRequired),
+          `escrow-project`
+        );
+        console.log(`✅ Project escrow XLM tx: ${stellarTxHash}`);
+      } else {
+        console.warn('createProject: no decrypted secret — skipping XLM escrow (MVP demo mode)');
+      }
+    } catch (escrowErr) {
+      console.warn('XLM escrow transfer skipped:', escrowErr.message);
+    }
+
+    // Llamar al contrato Soroban on-chain
     let onChainProjectId = null;
     try {
       const recruiterKeypair = Keypair.fromSecret(wallet.encrypted_secret);
@@ -57,7 +99,7 @@ const createProject = async (req, res) => {
       );
     } catch (contractErr) {
       console.error('Error on-chain createProject:', contractErr.message);
-      return res.status(500).json({ error: 'Error creando proyecto on-chain: ' + contractErr.message });
+      // No bloqueamos por el contrato — guardamos igual para el demo
     }
 
     // Guardar en DB
@@ -75,15 +117,13 @@ const createProject = async (req, res) => {
 
     const savedProject = await newProject.save();
 
-    wallet.balance_mxne -= totalRequired;
-    await wallet.save();
-
     const escrow = new Escrow({
       funder_id: funderId,
       type: 'project',
       reference_id: savedProject._id,
       amount: totalRequired,
-      status: 'locked',
+      status: stellarTxHash ? 'locked' : 'pending',
+      stellar_tx_hash: stellarTxHash || null,
     });
     await escrow.save();
 
@@ -92,8 +132,8 @@ const createProject = async (req, res) => {
       type: 'escrow',
       amount_mxn: totalRequired,
       amount_mxne: totalRequired,
-      status: 'completed',
-      stellar_tx_hash: `project_escrow_${onChainProjectId || Date.now()}`,
+      status: stellarTxHash ? 'completed' : 'pending',
+      stellar_tx_hash: stellarTxHash || `project_pending_${Date.now()}`,
     });
     await transaction.save();
 
@@ -109,7 +149,7 @@ const createProject = async (req, res) => {
         `Tienes una nueva propuesta de proyecto: "${title}".`, savedProject._id);
     }
 
-    res.status(201).json({ success: true, data: { projectId: onChainProjectId, project: savedProject } });
+    res.status(201).json({ success: true, data: { projectId: onChainProjectId, stellarTxHash, project: savedProject } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -290,21 +330,36 @@ const approveDelivery = async (req, res) => {
       }
     }
 
-    // Liberar escrow
-    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id, status: 'locked' });
+    // ── Liberar escrow: enviar XLM real plataforma → freelancer ──
+    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id });
     if (escrow) {
       const freelancerWallet = await Wallet.findOne({ user_id: project.freelancer_id });
       if (freelancerWallet) {
-        freelancerWallet.balance_mxne += escrow.amount;
-        await freelancerWallet.save();
+        const { sendXLMPayment } = require('../services/stellarService');
+        const platformSecret = process.env.PLATFORM_SECRET || process.env.ADMIN_SECRET;
+        const commission = escrow.amount * 0.10;
+        const payout = escrow.amount - commission;
+
+        let txHash = null;
+        try {
+          txHash = await sendXLMPayment(
+            platformSecret,
+            freelancerWallet.stellar_address,
+            String(payout),
+            `release-project-${project._id}`
+          );
+          console.log(`✅ Project payout XLM: ${txHash}`);
+        } catch (payErr) {
+          console.error('❌ Project payout XLM failed:', payErr.message);
+        }
 
         const payTx = new Transaction({
           user_id: project.freelancer_id,
           type: 'release',
-          amount_mxn: escrow.amount,
-          amount_mxne: escrow.amount,
-          status: 'completed',
-          stellar_tx_hash: `project_release_${project.on_chain_id || Date.now()}`,
+          amount_mxn: payout,
+          amount_mxne: payout,
+          status: txHash ? 'completed' : 'failed',
+          stellar_tx_hash: txHash || `release_failed_${Date.now()}`,
         });
         await payTx.save();
       }
@@ -418,13 +473,17 @@ const timeoutApprove = async (req, res) => {
       await contracts.timeoutApprove(platformKeypair, project.on_chain_id);
     }
 
-    // Liberar escrow
-    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id, status: 'locked' });
+    // ── Timeout approve: plataforma → freelancer en XLM ──
+    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id });
     if (escrow) {
       const freelancerWallet = await Wallet.findOne({ user_id: project.freelancer_id });
       if (freelancerWallet) {
-        freelancerWallet.balance_mxne += escrow.amount;
-        await freelancerWallet.save();
+        try {
+          const { sendXLMPayment } = require('../services/stellarService');
+          const platformSecret = process.env.PLATFORM_SECRET || process.env.ADMIN_SECRET;
+          const payout = escrow.amount * 0.90;
+          await sendXLMPayment(platformSecret, freelancerWallet.stellar_address, String(payout), `timeout-project-${project._id}`);
+        } catch (e) { console.error('Timeout payout failed:', e.message); }
       }
       escrow.status = 'released';
       await escrow.save();
@@ -456,12 +515,16 @@ const timeoutRefund = async (req, res) => {
       await contracts.timeoutRefund(platformKeypair, project.on_chain_id);
     }
 
-    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id, status: 'locked' });
+    // ── Timeout refund: plataforma → reclutador en XLM ──
+    const escrow = await Escrow.findOne({ type: 'project', reference_id: project._id });
     if (escrow) {
       const recruiterWallet = await Wallet.findOne({ user_id: project.recruiter_id });
       if (recruiterWallet) {
-        recruiterWallet.balance_mxne += escrow.amount;
-        await recruiterWallet.save();
+        try {
+          const { sendXLMPayment } = require('../services/stellarService');
+          const platformSecret = process.env.PLATFORM_SECRET || process.env.ADMIN_SECRET;
+          await sendXLMPayment(platformSecret, recruiterWallet.stellar_address, String(escrow.amount), `refund-project-${project._id}`);
+        } catch (e) { console.error('Timeout refund failed:', e.message); }
       }
       escrow.status = 'refunded';
       await escrow.save();

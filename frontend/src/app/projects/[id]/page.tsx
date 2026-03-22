@@ -13,7 +13,7 @@ import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
 import ChatBox from '@/components/projects/ChatBox';
-import { formatMXN, formatDate } from '@/lib/utils';
+import { formatXLM, formatDate } from '@/lib/utils';
 import { Calendar, DollarSign, Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { sileo } from 'sileo';
 import type { Project, User as UserType } from '@/types';
@@ -38,7 +38,10 @@ export default function ProjectDetailPage() {
   const fetchProject = async () => {
     try {
       const res = await api.get(`/projects/${params.id}`);
-      setProject(res.data);
+      // Backend returns { success, data: { project, onChainData } } or { success, data: project }
+      const payload = res.data?.data ?? res.data;
+      const proj = payload?.project ?? payload;
+      setProject(proj);
     } catch {}
     setLoading(false);
   };
@@ -111,7 +114,7 @@ export default function ProjectDetailPage() {
               <div className="animate-fade-up rounded-2xl p-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <h1 className="text-2xl font-bold text-white tracking-tight">{project.title}</h1>
-                  <Badge variant={getStatusVariant(project.status)}>{undefined}</Badge>
+                  <Badge variant={getStatusVariant(project.status)}>{project.status}</Badge>
                 </div>
                 <p className="text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>{project.description}</p>
               </div>
@@ -134,7 +137,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <div>
                       <p className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>Monto en escrow</p>
-                      <p className="text-sm font-bold text-white">{formatMXN(project.amount)}</p>
+                      <p className="text-sm font-bold text-white">{formatXLM(project.amount)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">

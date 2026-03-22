@@ -10,6 +10,15 @@ export function formatMXN(amount: number): string {
   }).format(amount);
 }
 
+export function formatXLM(amount: number | string | undefined | null): string {
+  const n = parseFloat(String(amount ?? 0));
+  if (isNaN(n)) return '0.00 XLM';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n) + ' XLM';
+}
+
 export function isValidDate(dateString: string | undefined | null): boolean {
   if (!dateString) return false;
   const d = new Date(dateString);

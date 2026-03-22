@@ -55,11 +55,22 @@ const getBalance = async (req, res) => {
     const wallet = await Wallet.findOne({ user_id: req.userId });
     if (!wallet) return res.status(404).json({ message: "Wallet not found!" });
 
+    // Obtener balance XLM real desde Stellar Horizon
+    let balance_xlm = 0;
+    let on_chain_balances = [];
+    try {
+      on_chain_balances = await getAccountBalances(wallet.stellar_address);
+      const xlmEntry = on_chain_balances.find(b => b.asset_type === 'native');
+      balance_xlm = parseFloat(xlmEntry?.balance ?? '0');
+    } catch { /* cuenta aún no activada */ }
+
     res.status(200).json({
       user_id: req.userId,
       stellar_address: wallet.stellar_address,
       balance_mxne: wallet.balance_mxne,
-      balance_usdc: wallet.balance_usdc
+      balance_usdc: wallet.balance_usdc,
+      balance_xlm,
+      on_chain_balances,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

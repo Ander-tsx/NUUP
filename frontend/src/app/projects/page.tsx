@@ -26,7 +26,8 @@ export default function ProjectsPage() {
     const fetchProjects = async () => {
       try {
         const res = await api.get('/projects');
-        setProjects(Array.isArray(res.data) ? res.data : []);
+        const payload = res.data?.data ?? res.data;
+        setProjects(Array.isArray(payload) ? payload : []);
       } catch { }
       setLoading(false);
     };

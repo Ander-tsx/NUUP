@@ -13,16 +13,16 @@ import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
 import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
-import { formatMXN } from '@/lib/utils';
 import { sileo } from 'sileo';
-import { Briefcase, ArrowRight, Lock, Wallet } from 'lucide-react';
+import { formatXLM } from '@/lib/utils';
+import { Briefcase, ArrowRight, Lock, Wallet, Zap } from 'lucide-react';
 
 const projectSchema = z.object({
   freelancer_id: z.string().min(1, 'Freelancer requerido'),
   category_id: z.string().min(1, 'Categoría requerida'),
   title: z.string().min(5, 'Mínimo 5 caracteres'),
   description: z.string().min(10, 'Mínimo 10 caracteres'),
-  amount: z.coerce.number().min(100, 'Mínimo $100 MXN'),
+  amount: z.coerce.number().min(1, 'Mínimo 1 XLM'),
   deadline: z.string().min(1, 'Deadline requerido'),
 });
 type ProjectForm = z.infer<typeof projectSchema>;
@@ -41,16 +41,27 @@ function CreateProjectContent() {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [xlmBalance, setXlmBalance] = useState<number | null>(null);
 
   useEffect(() => {
+    // Cargar categorías
     api.get('/categories').then((res) => {
       const cats = res.data?.data ?? res.data;
       setCategories(Array.isArray(cats) ? cats : []);
     }).catch(() => {});
+
+    // Cargar balance XLM on-chain real
     api.get('/wallets/balance')
-      .then((res) => setWalletBalance(res.data.balance_mxne ?? 0))
-      .catch(() => setWalletBalance(0));
+      .then((res) => {
+        // el endpoint devuelve balance_xlm o los on_chain_balances
+        const b = res.data?.data ?? res.data;
+        const xlm = b?.balance_xlm
+          ?? b?.on_chain_balances?.find((x: { asset_type: string; balance: string }) => x.asset_type === 'native')?.balance
+          ?? b?.balance_mxne  // fallback si el endpoint aún devuelve mxne
+          ?? 0;
+        setXlmBalance(parseFloat(String(xlm)));
+      })
+      .catch(() => setXlmBalance(0));
   }, []);
 
   const prefilledFreelancer = searchParams.get('freelancer_id') || '';
@@ -60,14 +71,15 @@ function CreateProjectContent() {
     defaultValues: { freelancer_id: prefilledFreelancer },
   });
 
-  // Coerce to number explicitly to avoid string concatenation bug
   const rawAmount = watch('amount');
   const amount = typeof rawAmount === 'string' ? parseFloat(rawAmount) || 0 : (rawAmount || 0);
-  const insufficient = walletBalance !== null && amount > 0 && amount > walletBalance;
+  // 10% plataforma se descuenta al liberar, el reclutador deposita el total
+  const commission = amount * 0.10;
+  const freelancerReceives = amount - commission;
+  const insufficient = xlmBalance !== null && amount > 0 && amount > xlmBalance;
 
   const onSubmit = async (data: ProjectForm) => {
     setLoading(true);
-    // Send only what the backend needs — no guarantee field
     const promise = api.post('/projects', {
       freelancer_id: data.freelancer_id,
       recruiter_id: user?._id,
@@ -78,13 +90,14 @@ function CreateProjectContent() {
       deadline: data.deadline,
     });
     sileo.promise(promise, {
-      loading: { title: 'Creando proyecto…' },
-      success: { title: 'Proyecto creado', description: 'Propuesta enviada al freelancer' },
+      loading: { title: 'Creando proyecto…', description: 'Enviando XLM al escrow on-chain' },
+      success: { title: 'Proyecto creado', description: 'XLM en escrow — propuesta enviada al freelancer' },
       error: { title: 'Error al crear proyecto' },
     });
     try {
       const res = await promise;
-      router.push(`/projects/${res.data._id}`);
+      const projectId = res.data?.data?.project?._id ?? res.data?._id;
+      if (projectId) router.push(`/projects/${projectId}`);
     } catch { }
     setLoading(false);
   };
@@ -100,19 +113,19 @@ function CreateProjectContent() {
         <div className="relative z-10 max-w-2xl mx-auto px-4 py-8">
           <div className="animate-fade-up mb-8">
             <p className="text-[10.5px] font-semibold uppercase tracking-widest mb-1.5" style={{ color: 'var(--text-3)' }}>
-              Contrato privado
+              Contrato privado · Stellar XLM
             </p>
             <h1 className="text-3xl font-bold text-white tracking-tight">Nuevo proyecto</h1>
             <p className="text-sm mt-1.5" style={{ color: 'var(--text-2)' }}>
-              El monto queda en escrow hasta que apruebes la entrega
+              El monto en XLM queda en escrow on-chain hasta que apruebes la entrega
             </p>
           </div>
 
-          {/* Wallet balance hint */}
-          {walletBalance !== null && (
+          {/* XLM Balance hint */}
+          {xlmBalance !== null && (
             <div
               className="animate-fade-up flex items-center gap-2.5 mb-5 px-3.5 py-2.5 rounded-xl text-xs"
-              style={walletBalance === 0 ? {
+              style={xlmBalance < 1 ? {
                 background: 'rgba(248,113,113,0.08)',
                 border: '1px solid rgba(248,113,113,0.25)',
                 color: 'rgba(248,113,113,0.9)',
@@ -123,8 +136,9 @@ function CreateProjectContent() {
               }}
             >
               <Wallet className="w-3.5 h-3.5 shrink-0" />
-              <span>Saldo disponible: <strong className="text-white">{formatMXN(walletBalance)}</strong> MXNe
-                {walletBalance === 0 && ' — Deposita fondos antes de crear un proyecto'}
+              <span>
+                Saldo XLM on-chain: <strong className="text-white">{formatXLM(xlmBalance)}</strong>
+                {xlmBalance < 1 && ' — Necesitas XLM en tu wallet Stellar para crear proyectos'}
               </span>
             </div>
           )}
@@ -158,30 +172,32 @@ function CreateProjectContent() {
               />
               <div>
                 <Input
-                  label="Monto (MXN)"
+                  label="Monto del proyecto (XLM)"
                   type="number"
-                  placeholder="3500"
+                  placeholder="10"
                   error={errors.amount?.message}
                   {...register('amount')}
                 />
 
-                {/* Amount summary */}
+                {/* Amount summary — escrow only */}
                 {amount > 0 && (
                   <div
-                    className="mt-2 flex items-center justify-between rounded-xl px-4 py-3 text-sm animate-fade-up"
+                    className="mt-2 rounded-xl px-4 py-3 text-sm animate-fade-up"
                     style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
                   >
-                    <div className="flex items-center gap-2" style={{ color: 'var(--text-2)' }}>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Se bloquea en escrow</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2" style={{ color: 'var(--text-2)' }}>
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Se deposita en escrow</span>
+                      </div>
+                      <span
+                        className="font-bold tabular-nums"
+                        style={{ color: insufficient ? '#f87171' : '#4ade80' }}
+                      >
+                        {formatXLM(amount)}
+                        {insufficient && <span className="text-[10px] ml-1.5 font-normal text-[#f87171]">saldo insuficiente</span>}
+                      </span>
                     </div>
-                    <span
-                      className="font-bold tabular-nums"
-                      style={{ color: insufficient ? '#f87171' : '#4ade80' }}
-                    >
-                      {formatMXN(amount)}
-                      {insufficient && <span className="text-[10px] ml-1.5 font-normal">saldo insuficiente</span>}
-                    </span>
                   </div>
                 )}
               </div>
@@ -194,7 +210,7 @@ function CreateProjectContent() {
               />
 
               <div className="flex gap-3 pt-2">
-                <Button type="submit" loading={loading} disabled={insufficient}>
+                <Button type="submit" loading={loading} disabled={insufficient || amount <= 0}>
                   <Briefcase className="w-4 h-4" /> Enviar propuesta <ArrowRight className="w-3.5 h-3.5 ml-1" />
                 </Button>
                 <Button variant="secondary" type="button" onClick={() => router.back()}>Cancelar</Button>

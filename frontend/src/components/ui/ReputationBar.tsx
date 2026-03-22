@@ -14,7 +14,7 @@ export default function ReputationBar({ label, score, maxScore = 200 }: Reputati
         <span className="text-[10.5px] font-semibold text-zinc-400 uppercase tracking-widest">
           {label}
         </span>
-        <span className="text-sm font-bold text-zinc-900">{score} <span className="text-xs font-normal text-zinc-400">pts</span></span>
+        <span className="text-sm font-bold text-zinc-200">{score} <span className="text-xs font-normal text-zinc-400">pts</span></span>
       </div>
       <div className="rep-bar-track">
         <div
