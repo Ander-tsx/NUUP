@@ -64,7 +64,7 @@ export default function EventDetailPage() {
     try {
       await promise;
       fetchAll();
-    } catch {}
+    } catch { }
     setApplying(false);
   };
 
@@ -86,7 +86,7 @@ export default function EventDetailPage() {
       setFileUrl('');
       setDescription('');
       fetchAll();
-    } catch {}
+    } catch { }
     setSubmitting(false);
   };
 
@@ -100,7 +100,7 @@ export default function EventDetailPage() {
     try {
       await promise;
       fetchAll();
-    } catch {}
+    } catch { }
   };
 
   if (loading) {
@@ -248,7 +248,7 @@ export default function EventDetailPage() {
                 <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-widest mb-2">
                   Premio
                 </p>
-                <p className="text-2xl font-bold text-zinc-900 mb-4">
+                <p className="text-2xl font-bold text-zinc-200 mb-4">
                   {formatMXN(event.prize_amount)}
                 </p>
 

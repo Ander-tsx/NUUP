@@ -12,7 +12,7 @@ export default function Card({ children, className, clickable = false, onClick }
   return (
     <div
       className={cn(
-        'card p-6',
+        'card p-5',
         clickable && 'card-clickable',
         className
       )}

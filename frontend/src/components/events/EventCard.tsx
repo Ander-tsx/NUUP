@@ -27,11 +27,11 @@ export default function EventCard({ event }: EventCardProps) {
         <Badge variant={getStatusVariant(event.status)}>{undefined}</Badge>
       </div>
 
-      <h3 className="text-base font-semibold text-zinc-900 mb-2 line-clamp-2">
+      <h3 className="text-base font-semibold text-zinc-200 mb-2 line-clamp-2">
         {event.title}
       </h3>
 
-      <p className="text-2xl font-bold text-zinc-900 mb-4">
+      <p className="text-2xl font-bold text-zinc-200 mb-4">
         {formatMXN(event.prize_amount)}
       </p>
 

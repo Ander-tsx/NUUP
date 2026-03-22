@@ -8,9 +8,9 @@ import ProtectedRoute from '@/components/layout/ProtectedRoute';
 import Navbar from '@/components/layout/Navbar';
 import EventCard from '@/components/events/EventCard';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
 import Spinner from '@/components/ui/Spinner';
 import EmptyState from '@/components/ui/EmptyState';
+import CustomSelect from '@/components/ui/CustomSelect';
 import { Plus, Search, Calendar } from 'lucide-react';
 import type { Event } from '@/types';
 
@@ -24,7 +24,7 @@ export default function EventsPage() {
   const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
 
   useEffect(() => {
-    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
+    api.get('/categories').then((res) => setCategories(res.data)).catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -50,69 +50,76 @@ export default function EventsPage() {
   return (
     <ProtectedRoute>
       <Navbar />
-      <div className="pt-14 min-h-screen bg-zinc-100">
+      <div className="pt-14 min-h-screen" style={{ background: 'var(--bg)' }}>
         <div className="max-w-6xl mx-auto px-4 py-8">
+
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="animate-fade-up flex items-end justify-between mb-8">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-                {user?.role === 'recruiter' ? 'Mis eventos' : 'Explorar eventos'}
+              <p className="text-[10.5px] font-semibold uppercase tracking-widest mb-1.5" style={{ color: 'var(--text-3)' }}>
+                {user?.role === 'recruiter' ? 'Mis eventos' : 'Explorar'}
+              </p>
+              <h1 className="text-3xl font-bold text-white tracking-tight">
+                {user?.role === 'recruiter' ? 'Eventos publicados' : 'Eventos'}
               </h1>
-              <p className="text-sm text-zinc-500 mt-1">
+              <p className="text-sm mt-1.5" style={{ color: 'var(--text-2)' }}>
                 {user?.role === 'recruiter'
-                  ? 'Gestiona tus eventos de competencia'
-                  : 'Encuentra oportunidades y compite por premios'}
+                  ? 'Gestiona tus competencias y revisa participaciones'
+                  : 'Encuentra oportunidades y compite por premios reales'}
               </p>
             </div>
             {user?.role === 'recruiter' && (
               <Button onClick={() => router.push('/events/create')}>
-                <Plus className="w-4 h-4 mr-1.5" />
+                <Plus className="w-4 h-4" />
                 Crear evento
               </Button>
             )}
           </div>
 
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+          <div className="flex flex-col sm:flex-row gap-3 mb-7">            {/* Search */}
+            <div className="relative flex-1 z-1000">
               <input
                 type="text"
-                placeholder="Buscar eventos..."
+                placeholder="Buscar eventos…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full border border-zinc-200 bg-white rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 transition-all duration-150"
+                className="input-base pl-9"
               />
             </div>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="border border-zinc-200 bg-white rounded-lg px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200 transition-all duration-150"
-            >
-              <option value="">Todas las categorías</option>
-              {categories.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+
+            {/* Category – custom select */}
+            <div className="sm:w-56 z-1000">
+              <CustomSelect
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                placeholder="Todas las categorías"
+                options={categories.map((c) => ({ value: c._id, label: c.name }))}
+              />
+            </div>
           </div>
 
           {/* Content */}
           {loading ? (
-            <div className="flex justify-center py-16">
+            <div className="flex justify-center py-20">
               <Spinner size="lg" />
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={Calendar}
-              title="No hay eventos"
+              title="Sin eventos"
               description="Aún no hay eventos disponibles. Vuelve pronto."
             />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map((event) => (
-                <EventCard key={event._id} event={event} />
+              {filtered.map((event, i) => (
+                <div
+                  key={event._id}
+                  className="animate-fade-up"
+                  style={{ animationDelay: `${i * 55}ms` }}
+                >
+                  <EventCard event={event} />
+                </div>
               ))}
             </div>
           )}
