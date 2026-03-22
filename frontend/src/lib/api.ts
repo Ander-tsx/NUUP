@@ -5,14 +5,25 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Response interceptor: handle 401 errors
+// Request interceptor: attach token from localStorage as Bearer header
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('pw_token');
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Response interceptor: handle 401 errors (only redirect if not already on auth pages)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear local auth state and redirect to login
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
         localStorage.removeItem('pw_auth');
+        localStorage.removeItem('pw_token');
         window.location.href = '/auth/login';
       }
     }
