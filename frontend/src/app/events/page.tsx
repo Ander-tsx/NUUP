@@ -24,7 +24,10 @@ export default function EventsPage() {
   const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
 
   useEffect(() => {
-    api.get('/categories').then((res) => setCategories(res.data)).catch(() => { });
+    api.get('/categories').then((res) => {
+      const list = res.data?.data ?? res.data;
+      setCategories(Array.isArray(list) ? list : []);
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -33,7 +36,8 @@ export default function EventsPage() {
         const params = new URLSearchParams();
         if (categoryFilter) params.set('category_id', categoryFilter);
         const res = await api.get(`/events?${params.toString()}`);
-        setEvents(res.data);
+        const list = res.data?.data ?? res.data;
+        setEvents(Array.isArray(list) ? list : []);
       } catch {
         setEvents([]);
       } finally {

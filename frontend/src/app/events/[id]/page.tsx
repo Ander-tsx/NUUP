@@ -38,9 +38,21 @@ export default function EventDetailPage() {
         api.get(`/events/${params.id}/participants`),
         api.get(`/events/${params.id}/submissions`),
       ]);
-      if (eventRes.status === 'fulfilled') setEvent(eventRes.value.data);
-      if (partRes.status === 'fulfilled') setParticipants(Array.isArray(partRes.value.data) ? partRes.value.data : []);
-      if (subRes.status === 'fulfilled') setSubmissions(Array.isArray(subRes.value.data) ? subRes.value.data : []);
+      if (eventRes.status === 'fulfilled') {
+        const d = eventRes.value.data;
+        // Backend may return { success, data: { event } } or plain event
+        setEvent(d?.data?.event ?? d?.data ?? d);
+      }
+      if (partRes.status === 'fulfilled') {
+        const d = partRes.value.data;
+        const list = d?.data ?? d;
+        setParticipants(Array.isArray(list) ? list : []);
+      }
+      if (subRes.status === 'fulfilled') {
+        const d = subRes.value.data;
+        const list = d?.data ?? d;
+        setSubmissions(Array.isArray(list) ? list : []);
+      }
     } catch { setEvent(null); }
     finally { setLoading(false); }
   };
@@ -73,7 +85,7 @@ export default function EventDetailPage() {
   };
 
   const handleSelectWinner = async (submissionId: string) => {
-    const promise = api.post(`/events/${params.id}/winner`, { submission_ids: [submissionId] });
+    const promise = api.post(`/events/${params.id}/winners`, { submission_ids: [submissionId] });
     sileo.promise(promise, {
       loading: { title: 'Seleccionando ganador…' },
       success: { title: 'Ganador seleccionado', description: 'Premio liberado desde Soroban' },
@@ -81,6 +93,7 @@ export default function EventDetailPage() {
     });
     try { await promise; fetchAll(); } catch {}
   };
+
 
   if (loading) {
     return (

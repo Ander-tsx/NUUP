@@ -15,6 +15,7 @@ import Button from '@/components/ui/Button';
 import { formatMXN } from '@/lib/utils';
 import { sileo } from 'sileo';
 import { AlertCircle, Zap, Wallet } from 'lucide-react';
+import type { StellarBalance } from '@/types';
 
 const eventSchema = z.object({
   title: z.string().min(5, 'Mínimo 5 caracteres'),
@@ -31,14 +32,17 @@ export default function CreateEventPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [onChainBalances, setOnChainBalances] = useState<StellarBalance[]>([]);
   const [backendError, setBackendError] = useState('');
 
   useEffect(() => {
-    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
-    api.get('/wallets/balance')
-      .then((res) => setWalletBalance(res.data.balance_mxne ?? 0))
-      .catch(() => setWalletBalance(0));
+    api.get('/categories').then((res) => {
+      const list = res.data?.data ?? res.data;
+      setCategories(Array.isArray(list) ? list : []);
+    }).catch(() => { });
+    api.get('/wallets/on-chain-balance')
+      .then((res) => setOnChainBalances(res.data.on_chain_balances ?? []))
+      .catch(() => setOnChainBalances([]));
   }, []);
 
   const { register, handleSubmit, watch, formState: { errors } } = useForm<EventForm>({
@@ -83,25 +87,35 @@ export default function CreateEventPage() {
 
           <div className="animate-fade-up delay-100 rounded-2xl p-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
             {/* Wallet balance hint */}
-            {walletBalance !== null && (
-              <div
-                className="flex items-center gap-2.5 mb-5 px-3.5 py-2.5 rounded-xl text-xs"
-                style={walletBalance === 0 ? {
-                  background: 'rgba(248,113,113,0.08)',
-                  border: '1px solid rgba(248,113,113,0.25)',
-                  color: 'rgba(248,113,113,0.9)',
-                } : {
-                  background: 'rgba(33,133,213,0.07)',
-                  border: '1px solid rgba(33,133,213,0.18)',
-                  color: 'var(--text-2)',
-                }}
-              >
-                <Wallet className="w-3.5 h-3.5 shrink-0" />
-                <span>Saldo disponible: <strong className="text-white">{formatMXN(walletBalance)}</strong> MXNe
-                  {walletBalance === 0 && ' — Deposita fondos antes de crear un evento'}
-                </span>
-              </div>
-            )}
+            {(() => {
+              const primaryBalance = onChainBalances.length > 0
+                ? parseFloat(onChainBalances[0].balance)
+                : 0;
+              const assetCode = onChainBalances.length > 0
+                ? (onChainBalances[0].asset_code || 'XLM')
+                : 'XLM';
+              return (
+                <div
+                  className="flex items-center gap-2.5 mb-5 px-3.5 py-2.5 rounded-xl text-xs"
+                  style={primaryBalance === 0 ? {
+                    background: 'rgba(248,113,113,0.08)',
+                    border: '1px solid rgba(248,113,113,0.25)',
+                    color: 'rgba(248,113,113,0.9)',
+                  } : {
+                    background: 'rgba(33,133,213,0.07)',
+                    border: '1px solid rgba(33,133,213,0.18)',
+                    color: 'var(--text-2)',
+                  }}
+                >
+                  <Wallet className="w-3.5 h-3.5 shrink-0" />
+                  <span>Saldo on-chain: <strong className="text-white">
+                    {primaryBalance.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                  </strong> {assetCode}
+                    {primaryBalance === 0 && ' — Fondea tu wallet antes de crear un evento'}
+                  </span>
+                </div>
+              );
+            })()}
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <Input label="Título del evento" placeholder="Ej: Diseña el logo de nuestra startup fintech" error={errors.title?.message} {...register('title')} />
@@ -116,16 +130,20 @@ export default function CreateEventPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Input label="Premio (MXN)" type="number" placeholder="2500" error={errors.prize_amount?.message} {...register('prize_amount')} />
-                  {prizeAmount > 0 && walletBalance !== null && prizeAmount > walletBalance && (
-                    <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> Saldo insuficiente ({formatMXN(walletBalance)})
-                    </p>
-                  )}
-                  {prizeAmount > 0 && (walletBalance === null || prizeAmount <= walletBalance) && (
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                      Se bloqueará {formatMXN(prizeAmount)} en Soroban
-                    </p>
-                  )}
+                  {prizeAmount > 0 && (() => {
+                    const primaryBalance = onChainBalances.length > 0 ? parseFloat(onChainBalances[0].balance) : 0;
+                    const assetCode = onChainBalances.length > 0 ? (onChainBalances[0].asset_code || 'XLM') : 'XLM';
+                    if (prizeAmount > primaryBalance) return (
+                      <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Saldo insuficiente ({primaryBalance.toLocaleString('es-MX', { minimumFractionDigits: 2 })} {assetCode})
+                      </p>
+                    );
+                    return (
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                        Se bloqueará {formatMXN(prizeAmount)} en Soroban
+                      </p>
+                    );
+                  })()}
                 </div>
                 <Input label="Máx. ganadores" type="number" placeholder="1" error={errors.max_winners?.message} {...register('max_winners')} />
               </div>
