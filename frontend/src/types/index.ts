@@ -237,4 +237,10 @@ export interface SearchFreelancer {
   reputation_score: number;
   completed_projects: number;
   rating: number;
+  categories?: { _id: string; name: string; slug?: string; icon?: string }[];
+  reputation_by_category?: {
+    category: { _id: string; name: string; slug?: string; icon?: string } | null;
+    score: number;
+    level: string;
+  }[];
 }

@@ -42,9 +42,9 @@ export default function DashboardPage() {
           try {
             const r = await api.get(`/reputation/${user._id}`);
             setReputations(Array.isArray(r.data) ? r.data : []);
-          } catch {}
+          } catch { }
         }
-      } catch {}
+      } catch { }
       setLoading(false);
     };
     fetchAll();
@@ -76,7 +76,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="relative z-10 max-w-6xl mx-auto px-4 py-8">
-          <PendingBanner />
+          {/* <PendingBanner /> */}
 
           {/* Welcome card */}
           <div className="animate-fade-up mt-6 mb-6">

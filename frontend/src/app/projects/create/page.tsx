@@ -44,7 +44,10 @@ function CreateProjectContent() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   useEffect(() => {
-    api.get('/categories').then((res) => setCategories(res.data)).catch(() => {});
+    api.get('/categories').then((res) => {
+      const cats = res.data?.data ?? res.data;
+      setCategories(Array.isArray(cats) ? cats : []);
+    }).catch(() => {});
     api.get('/wallets/balance')
       .then((res) => setWalletBalance(res.data.balance_mxne ?? 0))
       .catch(() => setWalletBalance(0));

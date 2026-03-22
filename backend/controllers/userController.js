@@ -292,4 +292,65 @@ const deleteUser = async (req, res) => {
   }
 };
 
-module.exports = { getUser, getWalletForUser, rotateWallet, getUserHistory, updateProfile, getRanking, deleteUser };
+/**
+ * GET /users/search/freelancers
+ * Retorna todos los freelancers del índice de búsqueda con filtros opcionales.
+ * Query params: category_id, min_reputation, limit, page
+ */
+const searchFreelancers = async (req, res) => {
+  try {
+    const { category_id, min_reputation, limit = 50, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const filter = {};
+    if (category_id) filter.categories = category_id;
+    if (min_reputation) filter.reputation_score = { $gte: Number(min_reputation) };
+
+    const freelancers = await SearchIndexFreelancers.find(filter)
+      .populate('user_id', 'username profile_image bio stellar_public_key')
+      .populate('categories', 'name slug icon')
+      .sort({ reputation_score: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Para cada freelancer, obtener sus reputaciones por categoría desde el modelo Reputation
+    const { Reputation } = require('../models/Reputation');
+    const userIds = freelancers.map((f) => f.user_id?._id).filter(Boolean);
+    const reputations = await Reputation.find({ user_id: { $in: userIds } })
+      .populate('category_id', 'name slug icon')
+      .lean();
+
+    // Agrupar reputaciones por user_id
+    const repMap = {};
+    for (const rep of reputations) {
+      const uid = rep.user_id.toString();
+      if (!repMap[uid]) repMap[uid] = [];
+      repMap[uid].push({
+        category: rep.category_id,
+        score: rep.score,
+        level: rep.level,
+      });
+    }
+
+    // Cargar títulos profesionales de FreelancerProfile
+    const profiles = await FreelancerProfile.find({ user_id: { $in: userIds } })
+      .select('user_id title')
+      .lean();
+    const titleMap = {};
+    for (const p of profiles) titleMap[p.user_id.toString()] = p.title || '';
+
+    // Inyectar reputaciones_por_categoria en cada freelancer
+    const enriched = freelancers.map((f) => ({
+      ...f,
+      title: titleMap[f.user_id?._id?.toString()] || '',
+      reputation_by_category: repMap[f.user_id?._id?.toString()] || [],
+    }));
+
+    res.status(200).json({ success: true, data: { freelancers: enriched, total: enriched.length } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getUser, getWalletForUser, rotateWallet, getUserHistory, updateProfile, getRanking, deleteUser, searchFreelancers };

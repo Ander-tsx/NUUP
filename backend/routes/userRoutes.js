@@ -1,8 +1,9 @@
 const express = require('express');
-const { getUser, getWalletForUser, rotateWallet, getUserHistory, updateProfile, getRanking, deleteUser } = require('../controllers/userController');
+const { getUser, getWalletForUser, rotateWallet, getUserHistory, updateProfile, getRanking, deleteUser, searchFreelancers } = require('../controllers/userController');
 const { verifyToken } = require('../middleware/jwt');
 const router = express.Router();
 router.get('/ranking', getRanking);
+router.get('/search/freelancers', searchFreelancers);
 router.get('/:publicKey', getUser);
 router.get('/:publicKey/wallet', verifyToken, getWalletForUser);
 router.post('/:publicKey/wallet/rotate', verifyToken, rotateWallet);

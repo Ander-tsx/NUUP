@@ -26,8 +26,11 @@ export default function FreelancersPage() {
   // Load categories from the real API
   useEffect(() => {
     api.get('/categories')
-      .then((res) => setCategories(Array.isArray(res.data) ? res.data : []))
-      .catch(() => {});
+      .then((res) => {
+        const cats = res.data?.data ?? res.data;
+        setCategories(Array.isArray(cats) ? cats : []);
+      })
+      .catch(() => { });
   }, []);
 
   const fetchFreelancers = useCallback(async () => {
@@ -39,8 +42,8 @@ export default function FreelancersPage() {
       if (minRep > 0) params.set('min_reputation', String(minRep));
       params.set('limit', '50');
       const res = await api.get(`/users/search/freelancers?${params.toString()}`);
-      const data = res.data;
-      setFreelancers(Array.isArray(data?.freelancers) ? data.freelancers : Array.isArray(data) ? data : []);
+      const payload = res.data?.data ?? res.data;
+      setFreelancers(Array.isArray(payload?.freelancers) ? payload.freelancers : Array.isArray(payload) ? payload : []);
     } catch {
       setFreelancers([]);
     } finally {
@@ -84,7 +87,6 @@ export default function FreelancersPage() {
           <div className="animate-fade-up delay-100 space-y-4 mb-8">
             {/* Search */}
             <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: 'var(--text-3)' }} />
               <input
                 type="text"
                 placeholder="Buscar por nombre…"
