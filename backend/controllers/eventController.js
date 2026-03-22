@@ -342,32 +342,46 @@ const selectWinner = async (req, res) => {
       winnerUserIds.push(submission.freelancer_id);
     }
 
-    // Distribuir premio en DB
+    // Distribuir premio: enviar XLM real desde la cuenta plataforma a cada ganador
     const escrow = await Escrow.findOne({ type: 'event', reference_id: event._id, status: 'locked' });
     if (escrow && winnerUserIds.length > 0) {
       const commission = escrow.amount * 0.10;
       const distributable = escrow.amount - commission;
       const prizePerWinner = distributable / winnerUserIds.length;
 
+      const { sendXLMPayment } = require('../services/stellarService');
+      const platformSecret = process.env.PLATFORM_SECRET || process.env.ADMIN_SECRET;
+
       for (const winnerId of winnerUserIds) {
         const winnerWallet = await Wallet.findOne({ user_id: winnerId });
-        if (winnerWallet) {
-          winnerWallet.balance_mxne += prizePerWinner;
-          await winnerWallet.save();
+        if (!winnerWallet) continue;
 
-          const payTx = new Transaction({
-            user_id: winnerId,
-            type: 'release',
-            amount_mxn: prizePerWinner,
-            amount_mxne: prizePerWinner,
-            status: 'completed',
-            stellar_tx_hash: `event_prize_${event.on_chain_id || Date.now()}_${winnerId}`,
-          });
-          await payTx.save();
-
-          await createNotification(winnerId, 'event', '¡Felicidades, ganaste!',
-            `Has ganado "${event.title}" y recibiste ${prizePerWinner} MXNe.`, event._id);
+        // Enviar XLM real desde la plataforma al ganador
+        let txHash = null;
+        try {
+          txHash = await sendXLMPayment(
+            platformSecret,
+            winnerWallet.stellar_address,
+            String(prizePerWinner),
+            `prize-${event._id}`
+          );
+          console.log(`✅ Prize XLM sent to ${winnerWallet.stellar_address}: ${txHash}`);
+        } catch (payErr) {
+          console.error(`❌ Prize XLM transfer failed for ${winnerId}:`, payErr.message);
         }
+
+        const payTx = new Transaction({
+          user_id: winnerId,
+          type: 'release',
+          amount_mxn: prizePerWinner,
+          amount_mxne: prizePerWinner,
+          status: txHash ? 'completed' : 'failed',
+          stellar_tx_hash: txHash || `prize_failed_${Date.now()}_${winnerId}`,
+        });
+        await payTx.save();
+
+        await createNotification(winnerId, 'event', '¡Felicidades, ganaste!',
+          `Has ganado "${event.title}" y recibiste ${prizePerWinner} XLM.`, event._id);
       }
 
       escrow.status = 'released';
