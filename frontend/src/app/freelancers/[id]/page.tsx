@@ -35,31 +35,17 @@ export default function FreelancerProfilePage() {
         };
         setData(normalized);
 
-        // Step 2: use the freelancer's stellar_public_key for the reputation call
+        // Step 2: use the freelancer's MongoDB _id for the DB-backed reputation
+        const freelancerUserId = normalized.user?._id;
         const freelancerPubKey = normalized.user?.stellar_public_key;
         setStellarAddress(freelancerPubKey || '');
 
-        if (freelancerPubKey) {
+        if (freelancerUserId) {
           try {
-            const repRes = await api.get(`/reputation/${freelancerPubKey}`);
+            // Use the DB reputation endpoint (not on-chain) — populated by events/projects
+            const repRes = await api.get(`/reputation/user/${freelancerUserId}`);
             const repPayload = repRes.data?.data ?? repRes.data;
-            // Reputation endpoint returns { slug: score } map — convert to Reputation[]
-            if (repPayload && typeof repPayload === 'object' && !Array.isArray(repPayload)) {
-              const reps = Object.entries(repPayload)
-                .filter(([, score]) => Number(score) > 0)
-                .map(([slug, score], i) => ({
-                  _id: slug + i,
-                  user_id: normalized.user?._id || '',
-                  category_id: slug,
-                  score: Number(score),
-                  level: Number(score) >= 100 ? 'gold' : Number(score) >= 50 ? 'silver' : 'bronze',
-                  created_at: '',
-                  updated_at: '',
-                }));
-              setReputations(reps as unknown as Reputation[]);
-            } else {
-              setReputations(Array.isArray(repPayload) ? repPayload : []);
-            }
+            setReputations(Array.isArray(repPayload) ? repPayload : []);
           } catch {
             setReputations([]);
           }

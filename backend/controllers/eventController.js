@@ -378,7 +378,43 @@ const selectWinner = async (req, res) => {
       }
 
       winnerUserIds.push(submission.freelancer_id);
-    }
+
+      // ── Upsert Reputation por categoría (lo que alimenta reputation_by_category) ──
+      if (event.category_id) {
+        try {
+          const REP_DELTA = 10;
+          const existing = await Reputation.findOne({
+            user_id: submission.freelancer_id,
+            category_id: event.category_id,
+          });
+
+          const newScore = (existing?.score ?? 0) + REP_DELTA;
+          const level =
+            newScore >= 500 ? 'diamond' :
+            newScore >= 200 ? 'platinum' :
+            newScore >= 100 ? 'gold' :
+            newScore >= 50  ? 'silver' : 'bronze';
+
+          await Reputation.findOneAndUpdate(
+            { user_id: submission.freelancer_id, category_id: event.category_id },
+            { $inc: { score: REP_DELTA }, $set: { level } },
+            { upsert: true, new: true }
+          );
+
+          await ReputationLog.create({
+            user_id: submission.freelancer_id,
+            category_id: event.category_id,
+            delta: REP_DELTA,
+            reason: `Ganó evento: ${event.title}`,
+            source_type: 'event',
+            source_id: event._id,
+            soroban_tx_hash: `event_win_${event._id}_${submission.freelancer_id}`,
+          });
+        } catch (repErr) {
+          console.error('Error upsertando Reputation:', repErr.message);
+        }
+      }
+    } // end for (submissionIdList)
 
     // Distribuir premio: enviar XLM real desde la cuenta plataforma a cada ganador
     const escrow = await Escrow.findOne({ type: 'event', reference_id: event._id, status: 'locked' });

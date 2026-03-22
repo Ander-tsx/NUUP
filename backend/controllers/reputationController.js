@@ -41,6 +41,33 @@ const getReputationByPublicKey = async (req, res) => {
 };
 
 /**
+ * GET /reputation/user/:userId
+ * Retorna reputación desde MongoDB (no on-chain) por MongoDB user _id.
+ * Usado en el perfil del freelancer para mostrar reputación por categoría.
+ */
+const getReputationByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const reputations = await Reputation.find({ user_id: userId })
+      .populate('category_id', 'name slug icon')
+      .lean();
+
+    const data = reputations.map((r) => ({
+      _id: r._id,
+      category_id: r.category_id,
+      score: r.score,
+      level: r.level,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    }));
+
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
  * GET /reputation/:publicKey/banned
  * Verifica si un usuario está baneado on-chain.
  */
@@ -213,4 +240,4 @@ const removeReputationOnChain = async (req, res) => {
   }
 };
 
-module.exports = { getReputationByPublicKey, checkBanned, shadowbanUser, unbanUser, addReputationOnChain, removeReputationOnChain };
+module.exports = { getReputationByPublicKey, getReputationByUserId, checkBanned, shadowbanUser, unbanUser, addReputationOnChain, removeReputationOnChain };

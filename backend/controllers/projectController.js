@@ -371,6 +371,52 @@ const approveDelivery = async (req, res) => {
     project.status = 'completed';
     await project.save();
 
+    // ── Upsert Reputation por categoría del proyecto ──
+    if (project.category_id) {
+      try {
+        const REP_DELTA = 15; // proyectos valen más que eventos
+        const existingRep = await Reputation.findOne({
+          user_id: project.freelancer_id,
+          category_id: project.category_id,
+        });
+        const newScore = (existingRep?.score ?? 0) + REP_DELTA;
+        const level =
+          newScore >= 500 ? 'diamond' :
+          newScore >= 200 ? 'platinum' :
+          newScore >= 100 ? 'gold' :
+          newScore >= 50  ? 'silver' : 'bronze';
+
+        await Reputation.findOneAndUpdate(
+          { user_id: project.freelancer_id, category_id: project.category_id },
+          { $inc: { score: REP_DELTA }, $set: { level } },
+          { upsert: true, new: true }
+        );
+
+        await ReputationLog.create({
+          user_id: project.freelancer_id,
+          category_id: project.category_id,
+          delta: REP_DELTA,
+          reason: `Proyecto completado: ${project.title}`,
+          source_type: 'project',
+          source_id: project._id,
+          soroban_tx_hash: `project_complete_${project._id}`,
+        });
+
+        // Reflejar en SearchIndexFreelancers también
+        const SearchIndexFreelancers = require('../models/SearchIndexFreelancers');
+        await SearchIndexFreelancers.findOneAndUpdate(
+          { user_id: project.freelancer_id },
+          {
+            $inc: { reputation_score: REP_DELTA, completed_projects: 1 },
+            $addToSet: { categories: project.category_id },
+          },
+          { upsert: true }
+        );
+      } catch (repErr) {
+        console.error('Error upsertando Reputation en proyecto:', repErr.message);
+      }
+    }
+
     const log = new ProjectStatusLog({ project_id: project._id, status: 'completed', changed_by: req.userId });
     await log.save();
 
