@@ -7,6 +7,8 @@ import Avatar from '@/components/ui/Avatar';
 import { formatTime } from '@/lib/utils';
 import { Send } from 'lucide-react';
 import type { Message, Conversation } from '@/types';
+import { getSocket } from '@/lib/socket';
+
 
 interface ChatBoxProps {
   projectId: string;
@@ -39,23 +41,41 @@ export default function ChatBox({ projectId, otherUserId, otherUsername }: ChatB
     getConversation();
   }, [projectId, otherUserId]);
 
-  // Poll messages every 4 seconds
+  // Socket.io integration
   useEffect(() => {
     if (!conversation?._id) return;
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('pw_token') || '' : '';
+    const socket = getSocket(token);
 
     const fetchMessages = async () => {
       try {
         const res = await api.get(`/messages/${conversation._id}`);
-        // Unwrap envelope
         const payload = res.data?.data ?? res.data;
         setMessages(Array.isArray(payload) ? payload : []);
       } catch {}
     };
 
     fetchMessages();
-    const interval = setInterval(fetchMessages, 4000);
-    return () => clearInterval(interval);
+
+    // Join room
+    socket.emit('join_conversation', conversation._id);
+
+    // Listen for new messages
+    socket.on('new_message', (message: Message) => {
+      setMessages((prev) => {
+        const exists = prev.some((m) => m._id === message._id);
+        if (exists) return prev;
+        return [...prev, message];
+      });
+    });
+
+    return () => {
+      socket.emit('leave_conversation', conversation._id);
+      socket.off('new_message');
+    };
   }, [conversation?._id]);
+
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -67,21 +87,22 @@ export default function ChatBox({ projectId, otherUserId, otherUsername }: ChatB
     setSending(true);
     const text = newMessage.trim();
     setNewMessage(''); // clear input immediately for UX
+
     try {
-      await api.post('/messages', {
-        conversation_id: conversation._id,
+      const token = typeof window !== 'undefined' ? localStorage.getItem('pw_token') || '' : '';
+      const socket = getSocket(token);
+
+      socket.emit('send_message', {
+        conversationId: conversation._id,
         message: text,
       });
-      // Refresh messages list
-      const res = await api.get(`/messages/${conversation._id}`);
-      const payload = res.data?.data ?? res.data;
-      setMessages(Array.isArray(payload) ? payload : []);
     } catch {
       // On error restore the text
       setNewMessage(text);
     }
     setSending(false);
   };
+
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
