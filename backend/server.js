@@ -3,12 +3,16 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 
+const { apiLimiter } = require('./middleware/rateLimiter');
+
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:3001'];
+
+app.set('trust proxy', 1);
 
 // ── CORS ── must be the VERY FIRST middleware
 app.use((req, res, next) => {
@@ -25,6 +29,10 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+
+
+app.use('/api', apiLimiter);
 
 // ── Body parsers (after CORS) ──
 app.use(express.json());
