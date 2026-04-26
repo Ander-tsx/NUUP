@@ -167,8 +167,9 @@ export interface Transaction {
   type: 'deposit' | 'withdraw' | 'escrow' | 'release';
   amount_mxn: number;
   amount_mxne: number;
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed';
   stellar_tx_hash?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
