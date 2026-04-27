@@ -14,8 +14,9 @@ const transactionSchema = new mongoose.Schema({
   type: { type: String, enum: ['deposit', 'withdraw', 'escrow', 'release', 'payment'], required: true },
   amount_mxn: { type: Number, required: true },
   amount_mxne: { type: Number, required: true },
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
-  stellar_tx_hash: { type: String }
+  status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'pending' },
+  stellar_tx_hash: { type: String },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 const escrowSchema = new mongoose.Schema({

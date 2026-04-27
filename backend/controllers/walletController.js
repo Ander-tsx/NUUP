@@ -1,6 +1,11 @@
 const { Wallet, Transaction, Escrow } = require('../models/Wallet');
 const { getAccountBalances } = require('../services/stellarService');
 const { createNotification } = require('../services/notificationService');
+const { validateCLABE } = require('../utils/validateCLABE');
+const vibrantService = require('../services/vibrantService');
+
+const MXNE_ASSET_CODE = process.env.MXNE_ASSET_CODE || 'MXNE';
+const MXNE_ASSET_ISSUER = process.env.MXNE_ASSET_ISSUER;
 
 const getWallet = async (req, res) => {
   try {
@@ -124,43 +129,162 @@ const depositFunds = async (req, res) => {
  */
 const withdrawFunds = async (req, res) => {
   try {
-    const { amount_mxne, external_address } = req.body;
+    const { amount_mxne, clabe } = req.body;
+    const amount = Number(amount_mxne);
 
-    if (!amount_mxne || amount_mxne <= 0) {
-      return res.status(400).json({ message: "Valid amount_mxne is required." });
+    if (!amount || amount < 50) {
+      return res.status(400).json({ error: 'El monto minimo de retiro es 50 MXNe.' });
+    }
+
+    if (!validateCLABE(String(clabe || ''))) {
+      return res.status(400).json({ error: 'CLABE invalida. Verifica los 18 digitos.' });
     }
 
     const wallet = await Wallet.findOne({ user_id: req.userId });
     if (!wallet) return res.status(404).json({ message: "Wallet not found!" });
 
-    if (wallet.balance_mxne < amount_mxne) {
-      return res.status(400).json({ message: "Insufficient funds!" });
+    const onChainBalances = await getAccountBalances(wallet.stellar_address);
+    const mxneEntry = onChainBalances.find((b) => {
+      const codeMatches = (b.asset_code || '').toUpperCase() === MXNE_ASSET_CODE.toUpperCase();
+      if (!codeMatches) return false;
+      if (!MXNE_ASSET_ISSUER) return true;
+      return b.asset_issuer === MXNE_ASSET_ISSUER;
+    });
+    const onChainBalance = parseFloat(mxneEntry?.balance || '0');
+
+    if (onChainBalance < amount) {
+      return res.status(400).json({ error: 'Saldo on-chain insuficiente.' });
     }
 
-    // Create withdrawal transaction
+    // Create pending transaction first for traceability/idempotency.
     const transaction = new Transaction({
       user_id: req.userId,
       type: 'withdraw',
-      amount_mxn: amount_mxne, // 1:1 for now
-      amount_mxne,
-      status: 'completed',
-      stellar_tx_hash: `mock_withdraw_${Date.now()}`
+      amount_mxn: amount, // 1:1
+      amount_mxne: amount,
+      status: 'pending',
+      stellar_tx_hash: `pending_withdraw_${Date.now()}`,
+      metadata: {
+        destination_clabe_last4: String(clabe).slice(-4),
+      }
     });
     await transaction.save();
 
-    // Update wallet balance
-    wallet.balance_mxne -= amount_mxne;
-    await wallet.save();
+    try {
+      // NOTE: Current codebase stores the secret in encrypted_secret and may be plain or encrypted.
+      // For now we keep compatibility by using the stored value directly.
+      const rawSecret = wallet.encrypted_secret;
+      const txHash = await vibrantService.sendMXNeToVibrant(rawSecret, amount);
+      const payoutRef = await vibrantService.requestSPEIPayout(String(clabe), amount, transaction._id.toString());
 
-    await createNotification(req.userId, 'payment', 'Retiro exitoso', `Se retiraron ${amount_mxne} MXNe de tu wallet.`, transaction._id);
+      transaction.status = 'processing';
+      transaction.stellar_tx_hash = txHash;
+      transaction.metadata = {
+        ...transaction.metadata,
+        vibrant_payout_ref: payoutRef,
+      };
+      await transaction.save();
 
-    res.status(201).json({
-      message: "Withdrawal successful.",
-      transaction,
-      new_balance: wallet.balance_mxne
-    });
+      await createNotification(
+        req.userId,
+        'payment',
+        'Retiro en proceso',
+        `Tu retiro de ${amount} MXNe esta siendo procesado. En horario bancario SPEI suele tardar minutos; fuera de horario se procesa el siguiente dia habil.`,
+        transaction._id
+      );
+
+      res.status(201).json({
+        success: true,
+        data: { transaction },
+      });
+    } catch (err) {
+      transaction.status = 'failed';
+      await transaction.save();
+      await createNotification(
+        req.userId,
+        'payment',
+        'Retiro fallido',
+        `No se pudo procesar tu retiro de ${amount} MXNe. Intenta de nuevo.`,
+        transaction._id
+      );
+      res.status(500).json({ error: 'Error al procesar el retiro. Intenta de nuevo.' });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * POST /wallets/vibrant/webhook
+ * Handles payout status updates sent by Vibrant.
+ */
+const handleVibrantWebhook = async (req, res) => {
+  try {
+    if (!vibrantService.verifyWebhookSecret(req)) {
+      return res.status(401).json({ error: 'Unauthorized webhook.' });
+    }
+
+    const { type, data } = req.body || {};
+    if (!type || !data) return res.status(400).json({ error: 'Invalid webhook payload.' });
+
+    if (type === 'payout.completed') {
+      const tx = await Transaction.findOne({ 'metadata.vibrant_payout_ref': data.reference });
+      if (!tx) return res.status(404).json({ error: 'Transaction not found for payout reference.' });
+
+      tx.status = 'completed';
+      await tx.save();
+
+      await createNotification(
+        tx.user_id,
+        'payment',
+        'Retiro completado',
+        'Tu retiro ha sido depositado en tu cuenta bancaria.',
+        tx._id
+      );
+      return res.status(200).json({ success: true });
+    }
+
+    if (type === 'payout.failed') {
+      const tx = await Transaction.findOne({ 'metadata.vibrant_payout_ref': data.reference });
+      if (!tx) return res.status(404).json({ error: 'Transaction not found for payout reference.' });
+
+      // Reverse the transfer by sending MXNe back from platform custody to user's wallet.
+      const userWallet = await Wallet.findOne({ user_id: tx.user_id });
+      if (userWallet?.stellar_address) {
+        try {
+          const reversalHash = await vibrantService.reverseWithdrawalToUser(
+            userWallet.stellar_address,
+            tx.amount_mxne,
+            tx._id.toString()
+          );
+          tx.metadata = {
+            ...(tx.metadata || {}),
+            reversal_tx_hash: reversalHash,
+          };
+        } catch (reversalErr) {
+          tx.metadata = {
+            ...(tx.metadata || {}),
+            reversal_error: reversalErr.message,
+          };
+        }
+      }
+
+      tx.status = 'failed';
+      await tx.save();
+
+      await createNotification(
+        tx.user_id,
+        'payment',
+        'Retiro fallido',
+        'Tu retiro no pudo completarse. El saldo fue revertido a tu wallet.',
+        tx._id
+      );
+      return res.status(200).json({ success: true });
+    }
+
+    return res.status(200).json({ success: true, ignored: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -184,4 +308,13 @@ const getOnChainBalance = async (req, res) => {
   }
 };
 
-module.exports = { getWallet, getTransactions, getEscrows, getBalance, depositFunds, withdrawFunds, getOnChainBalance };
+module.exports = {
+  getWallet,
+  getTransactions,
+  getEscrows,
+  getBalance,
+  depositFunds,
+  withdrawFunds,
+  getOnChainBalance,
+  handleVibrantWebhook,
+};

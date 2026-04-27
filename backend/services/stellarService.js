@@ -263,6 +263,69 @@ async function sendXLMPayment(senderSecret, destinationPubKey, amount, memo = ''
   return submitData.hash;
 }
 
+/**
+ * Sends a Stellar classic issued-asset payment (e.g. MXNe).
+ *
+ * @param {string} senderSecret
+ * @param {string} destinationPubKey
+ * @param {string|number} amount
+ * @param {string} assetCode
+ * @param {string} assetIssuer
+ * @param {string} memo
+ * @returns {Promise<string>}
+ */
+async function sendAssetPayment(senderSecret, destinationPubKey, amount, assetCode, assetIssuer, memo = '') {
+  const { Keypair: KP, TransactionBuilder: TB, Networks, Operation, Asset, Memo, Account } = require('@stellar/stellar-sdk');
+
+  if (!assetCode || !assetIssuer) {
+    throw new Error('Asset code and issuer are required for asset transfer.');
+  }
+
+  const isTestnet = process.env.NETWORK !== 'mainnet';
+  const horizonUrl = isTestnet ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org';
+  const networkPassphrase = isTestnet ? Networks.TESTNET : Networks.PUBLIC;
+
+  const senderKeypair = KP.fromSecret(senderSecret);
+
+  const accountRes = await fetch(`${horizonUrl}/accounts/${senderKeypair.publicKey()}`);
+  if (!accountRes.ok) throw new Error(`Account not found on Stellar: ${senderKeypair.publicKey()}`);
+  const accountData = await accountRes.json();
+  const account = new Account(senderKeypair.publicKey(), accountData.sequence);
+
+  const formattedAmount = parseFloat(amount).toFixed(7);
+  const asset = new Asset(assetCode, assetIssuer);
+
+  const txBuilder = new TB(account, {
+    fee: '100',
+    networkPassphrase,
+  })
+    .addOperation(Operation.payment({
+      destination: destinationPubKey,
+      asset,
+      amount: formattedAmount,
+    }))
+    .setTimeout(30);
+
+  if (memo) txBuilder.addMemo(Memo.text(memo.slice(0, 28)));
+
+  const tx = txBuilder.build();
+  tx.sign(senderKeypair);
+
+  const submitRes = await fetch(`${horizonUrl}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `tx=${encodeURIComponent(tx.toXDR())}`,
+  });
+  const submitData = await submitRes.json();
+
+  if (!submitRes.ok) {
+    const resultCodes = submitData?.extras?.result_codes;
+    throw new Error(`Stellar asset tx failed: ${JSON.stringify(resultCodes || submitData)}`);
+  }
+
+  return submitData.hash;
+}
+
 module.exports = {
     submitContractCall,
     distributeEventPrize,
@@ -276,4 +339,5 @@ module.exports = {
     accountExists,
     fundTestnetAccount,
     sendXLMPayment,
+    sendAssetPayment,
 };

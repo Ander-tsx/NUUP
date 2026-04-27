@@ -28,8 +28,13 @@ export default function WalletPage() {
   const [loading, setLoading] = useState(true);
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawAddress, setWithdrawAddress] = useState('');
+  const [withdrawClabe, setWithdrawClabe] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [showWithdrawProcessingHint, setShowWithdrawProcessingHint] = useState(false);
+
+  const normalizeClabe = (value: string) => value.replace(/\D/g, '').slice(0, 18);
+  const isClabeLengthValid = withdrawClabe.length === 18;
+  const isWithdrawAmountValid = Number(withdrawAmount) >= 50;
 
   const fetchWallet = async () => {
     try {
@@ -62,15 +67,24 @@ export default function WalletPage() {
 
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
-    if (!amount || amount <= 0) return;
+    if (!amount || amount < 50 || !isClabeLengthValid) return;
     setActionLoading(true);
-    const promise = api.post('/wallets/withdraw', { amount_mxne: amount, external_address: withdrawAddress || undefined });
+    const promise = api.post('/wallets/withdraw', { amount_mxne: amount, clabe: withdrawClabe });
     sileo.promise(promise, {
       loading: { title: 'Procesando retiro...' },
-      success: { title: 'Retiro exitoso', description: `${formatMXN(amount)} MXNe retirados` },
+      success: {
+        title: 'Retiro enviado',
+        description: `${formatMXN(amount)} MXNe en proceso de SPEI (normalmente minutos en horario bancario)`,
+      },
       error:   { title: 'Error al retirar' },
     });
-    try { await promise; setWithdrawAmount(''); setWithdrawAddress(''); await fetchWallet(); } catch {}
+    try {
+      await promise;
+      setShowWithdrawProcessingHint(true);
+      setWithdrawAmount('');
+      setWithdrawClabe('');
+      await fetchWallet();
+    } catch {}
     setActionLoading(false);
   };
 
@@ -183,10 +197,35 @@ export default function WalletPage() {
               </div>
               <div className="space-y-3">
                 <Input label="Monto (MXNe)" type="number" placeholder="500" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} />
-                <Input label="CLABE / Dirección (opcional)" placeholder="012345…" value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} />
-                <Button variant="secondary" className="w-full" onClick={handleWithdraw} loading={actionLoading} disabled={!withdrawAmount || Number(withdrawAmount) <= 0}>
+                <Input
+                  label="CLABE (18 digitos)"
+                  placeholder="012345678901234567"
+                  value={withdrawClabe}
+                  onChange={(e) => setWithdrawClabe(normalizeClabe(e.target.value))}
+                />
+                {withdrawClabe.length > 0 && !isClabeLengthValid && (
+                  <p className="text-xs text-[#f87171]">La CLABE debe tener exactamente 18 digitos.</p>
+                )}
+                {!isWithdrawAmountValid && withdrawAmount.length > 0 && (
+                  <p className="text-xs text-[#f87171]">El monto minimo de retiro es 50 MXNe.</p>
+                )}
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                  SPEI suele acreditarse en minutos dentro de horario bancario (Lun-Vie 7am-7pm CDMX). Fuera de horario, se procesa el siguiente dia habil.
+                </p>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={handleWithdraw}
+                  loading={actionLoading}
+                  disabled={!withdrawAmount || !isWithdrawAmountValid || !isClabeLengthValid}
+                >
                   Retirar a cuenta
                 </Button>
+                {showWithdrawProcessingHint && (
+                  <p className="text-xs text-[#60b8f0]">
+                    Retiro en proceso: revisa el historial para ver el estado "En proceso" hasta confirmacion del banco.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -223,8 +262,14 @@ export default function WalletPage() {
                         <p className="text-sm font-bold tabular-nums" style={{ color: isPositive ? '#4ade80' : '#f87171' }}>
                           {isPositive ? '+' : '-'}{formatMXN(tx.amount_mxn)}
                         </p>
-                        <Badge variant={tx.status === 'completed' ? 'completed' : tx.status === 'pending' ? 'pending' : 'rejected'}>
-                          {tx.status === 'completed' ? 'Completado' : tx.status === 'pending' ? 'Pendiente' : 'Fallido'}
+                        <Badge variant={tx.status === 'completed' ? 'completed' : tx.status === 'failed' ? 'rejected' : 'pending'}>
+                          {tx.status === 'completed'
+                            ? 'Completado'
+                            : tx.status === 'processing'
+                              ? 'En proceso'
+                              : tx.status === 'pending'
+                                ? 'Pendiente'
+                                : 'Fallido'}
                         </Badge>
                       </div>
                     </div>
