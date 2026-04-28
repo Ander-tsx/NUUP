@@ -21,7 +21,8 @@ REM       es interpretado por CMD como separador de comandos dentro de bloques
 REM       for /f, truncando el valor. Se usa literal en cada comando.
 set NETWORK=testnet
 set RPC_URL=https://soroban-testnet.stellar.org
-set XLM_TOKEN=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+REM Read from .env or set manually
+SET MXNE_TOKEN_ADDRESS=%MXNE_TOKEN_ADDRESS%
 
 REM ── Compilar contratos ─────────────────────────────────────
 echo [1/7] Compilando contratos...
@@ -84,7 +85,7 @@ for /f "delims=" %%i in ('stellar keys address platform') do set PLATFORM_ADDR=%
 
 echo Usando Admin:    !ADMIN_ADDR!
 echo Usando Platform: !PLATFORM_ADDR!
-echo Usando Token:    %XLM_TOKEN%
+echo Usando Token:    %MXNE_TOKEN_ADDRESS%
 echo.
 
 REM ── Inicializar contratos ──────────────────────────────────
@@ -112,7 +113,7 @@ if %errorlevel% neq 0 (
 )
 
 echo    Inicializando EventContract...
-stellar contract invoke --id !EVENT_ID! --source admin --network testnet --network-passphrase "Test SDF Network ; September 2015" --rpc-url https://soroban-testnet.stellar.org --send=yes -- initialize --admin !ADMIN_ADDR! --token %XLM_TOKEN% --reputation_addr !REPUTATION_ID! --platform_addr !PLATFORM_ADDR! --wallet_registry_addr !WALLET_ID!
+stellar contract invoke --id !EVENT_ID! --source admin --network testnet --network-passphrase "Test SDF Network ; September 2015" --rpc-url https://soroban-testnet.stellar.org --send=yes -- initialize --admin !ADMIN_ADDR! --token_address %MXNE_TOKEN_ADDRESS% --reputation_addr !REPUTATION_ID! --platform_addr !PLATFORM_ADDR! --wallet_registry_addr !WALLET_ID!
 if %errorlevel% neq 0 (
     echo [ERROR] Fallo al inicializar EventContract.
     pause
@@ -120,7 +121,7 @@ if %errorlevel% neq 0 (
 )
 
 echo    Inicializando ProjectContract...
-stellar contract invoke --id !PROJECT_ID! --source admin --network testnet --network-passphrase "Test SDF Network ; September 2015" --rpc-url https://soroban-testnet.stellar.org --send=yes -- initialize --admin !ADMIN_ADDR! --token %XLM_TOKEN% --reputation_addr !REPUTATION_ID! --platform_addr !PLATFORM_ADDR! --wallet_registry_addr !WALLET_ID!
+stellar contract invoke --id !PROJECT_ID! --source admin --network testnet --network-passphrase "Test SDF Network ; September 2015" --rpc-url https://soroban-testnet.stellar.org --send=yes -- initialize --admin !ADMIN_ADDR! --token_address %MXNE_TOKEN_ADDRESS% --reputation_addr !REPUTATION_ID! --platform_addr !PLATFORM_ADDR! --wallet_registry_addr !WALLET_ID!
 if %errorlevel% neq 0 (
     echo [ERROR] Fallo al inicializar ProjectContract.
     pause

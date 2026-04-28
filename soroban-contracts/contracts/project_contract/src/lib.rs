@@ -37,7 +37,7 @@ pub struct ProjectData {
 #[contracttype]
 pub enum DataKey {
     Admin,
-    Token,
+    TokenAddress,
     ReputationAddr,
     PlatformAddr,
     WalletRegistryAddr,  // Address del contrato WalletRegistry
@@ -59,7 +59,7 @@ impl ProjectContract {
     pub fn initialize(
         env: Env,
         admin: Address,
-        token: Address,
+        token_address: Address,
         reputation_addr: Address,
         platform_addr: Address,
         wallet_registry_addr: Address,
@@ -69,7 +69,7 @@ impl ProjectContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Token, &token);
+        env.storage().instance().set(&DataKey::TokenAddress, &token_address);
         env.storage().instance().set(&DataKey::ReputationAddr, &reputation_addr);
         env.storage().instance().set(&DataKey::PlatformAddr, &platform_addr);
         env.storage().instance().set(&DataKey::WalletRegistryAddr, &wallet_registry_addr);
@@ -77,6 +77,11 @@ impl ProjectContract {
     }
 
     // ── Helpers internos ──────────────────────────────────────────────────────
+
+    // Helper to read token address
+    fn get_token_address(env: &Env) -> Address {
+        env.storage().instance().get(&DataKey::TokenAddress).unwrap()
+    }
 
     /// Verifica que una wallet esté registrada y activa en WalletRegistry.
     fn require_active_wallet(env: &Env, wallet: &Address) {
@@ -169,8 +174,7 @@ impl ProjectContract {
             panic!("deadline must be at least 1 day from now");
         }
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
         token_client.transfer(&recruiter, &env.current_contract_address(), &(amount + guarantee));
 
         let mut counter: u64 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0);
@@ -270,8 +274,7 @@ impl ProjectContract {
         }
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         let total_escrow = project.amount + project.guarantee;
         let commission = total_escrow * 7 / 100;
@@ -360,8 +363,7 @@ impl ProjectContract {
         }
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         let total_escrow = project.amount + project.guarantee;
         let commission = total_escrow * 7 / 100;
@@ -402,8 +404,7 @@ impl ProjectContract {
         }
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         let total_escrow = project.amount + project.guarantee;
         let commission = total_escrow * 7 / 100;
@@ -437,8 +438,7 @@ impl ProjectContract {
         }
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         let total_escrow = project.amount + project.guarantee;
         let commission = total_escrow * 7 / 100;
