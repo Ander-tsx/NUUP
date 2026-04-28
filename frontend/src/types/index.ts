@@ -1,17 +1,33 @@
 // ── User ──
+export interface CompanyProfile {
+  name?: string;
+  rfc?: string;
+  logo_url?: string;
+  website?: string;
+  description?: string;
+  industry?: string;
+  founded_year?: number;
+  employee_count?: "1-10" | "11-50" | "51-200" | "200+";
+  verified: boolean;
+  verified_at?: string;
+  verification_requested_at?: string;
+}
+
 export interface User {
   _id: string;
   email: string;
-  role: 'freelancer' | 'recruiter' | 'admin';
+  role: "freelancer" | "recruiter" | "admin";
   username: string;
   profile_image: string;
   bio: string;
   country: string;
-  status: 'active' | 'suspended' | 'banned';
+  status: "active" | "suspended" | "banned";
   stellar_public_key: string;
   last_login: string | null;
   created_at: string;
   updated_at: string;
+  email_notifications?: boolean;
+  company?: CompanyProfile;
 }
 
 export interface FreelancerProfile {
@@ -20,7 +36,7 @@ export interface FreelancerProfile {
   title: string;
   description: string;
   skills: string[];
-  experience_level: 'junior' | 'mid' | 'senior';
+  experience_level: "junior" | "mid" | "senior";
   availability: string;
   portfolio_url: string;
   created_at: string;
@@ -63,7 +79,7 @@ export interface Event {
   max_winners: number;
   deadline_submission: string;
   deadline_selection: string;
-  status: 'draft' | 'active' | 'completed' | 'cancelled';
+  status: "draft" | "active" | "completed" | "cancelled";
   soroban_event_id?: string;
   created_at: string;
   updated_at: string;
@@ -73,7 +89,7 @@ export interface EventParticipant {
   _id: string;
   event_id: string;
   freelancer_id: string;
-  status: 'applied' | 'submitted' | 'winner' | 'rejected';
+  status: "applied" | "submitted" | "winner" | "rejected";
   created_at: string;
   updated_at: string;
 }
@@ -100,7 +116,13 @@ export interface Project {
   amount: number;
   guarantee: number;
   deadline: string;
-  status: 'proposed' | 'active' | 'review' | 'completed' | 'rejected' | 'disputed';
+  status:
+    | "proposed"
+    | "active"
+    | "review"
+    | "completed"
+    | "rejected"
+    | "disputed";
   soroban_project_id?: string;
   correction_used: boolean;
   created_at: string;
@@ -164,10 +186,10 @@ export interface Wallet {
 export interface Transaction {
   _id: string;
   user_id: string;
-  type: 'deposit' | 'withdraw' | 'escrow' | 'release';
+  type: "deposit" | "withdraw" | "escrow" | "release";
   amount_mxn: number;
   amount_mxne: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: "pending" | "processing" | "completed" | "failed";
   stellar_tx_hash?: string;
   metadata?: Record<string, unknown>;
   created_at: string;
@@ -191,7 +213,7 @@ export interface ReputationLog {
   category_id: string;
   delta: number;
   reason: string;
-  source_type: 'event' | 'project' | 'dispute';
+  source_type: "event" | "project" | "dispute";
   source_id: string;
   soroban_tx_hash?: string;
   created_at: string;
@@ -204,8 +226,8 @@ export interface Dispute {
   opened_by: string;
   reason: string;
   description: string;
-  status: 'open' | 'reviewing' | 'resolved';
-  resolution: 'freelancer' | 'recruiter' | 'none';
+  status: "open" | "reviewing" | "resolved";
+  resolution: "freelancer" | "recruiter" | "none";
   resolved_by?: string;
   created_at: string;
   updated_at: string;
@@ -215,7 +237,7 @@ export interface Dispute {
 export interface Notification {
   _id: string;
   user_id: string;
-  type: 'event' | 'project' | 'payment' | 'system';
+  type: "event" | "project" | "payment" | "system";
   title: string;
   message: string;
   reference_id?: string;
@@ -241,7 +263,12 @@ export interface SearchFreelancer {
   rating: number;
   categories?: { _id: string; name: string; slug?: string; icon?: string }[];
   reputation_by_category?: {
-    category: { _id: string; name: string; slug?: string; icon?: string } | null;
+    category: {
+      _id: string;
+      name: string;
+      slug?: string;
+      icon?: string;
+    } | null;
     score: number;
     level: string;
   }[];
