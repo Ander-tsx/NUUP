@@ -32,7 +32,7 @@ pub struct EventData {
 #[contracttype]
 pub enum DataKey {
     Admin,
-    Token,
+    TokenAddress,
     ReputationAddr,
     WalletRegistryAddr,  // Address del contrato WalletRegistry
     Event(u64),
@@ -54,7 +54,7 @@ impl EventContract {
     pub fn initialize(
         env: Env,
         admin: Address,
-        token: Address,
+        token_address: Address,
         reputation_addr: Address,
         platform_addr: Address,
         wallet_registry_addr: Address,
@@ -65,7 +65,7 @@ impl EventContract {
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Token, &token);
+        env.storage().instance().set(&DataKey::TokenAddress, &token_address);
         env.storage().instance().set(&DataKey::ReputationAddr, &reputation_addr);
         env.storage().instance().set(&DataKey::PlatformAddr, &platform_addr);
         env.storage().instance().set(&DataKey::WalletRegistryAddr, &wallet_registry_addr);
@@ -73,6 +73,11 @@ impl EventContract {
     }
 
     // ── Helpers internos ──────────────────────────────────────────────────────
+
+    // Helper to read token address
+    fn get_token_address(env: &Env) -> Address {
+        env.storage().instance().get(&DataKey::TokenAddress).unwrap()
+    }
 
     /// Verifica que una wallet esté registrada y activa en WalletRegistry.
     /// Se llama en create_event (reclutador) y apply_to_event (freelancer).
@@ -140,8 +145,7 @@ impl EventContract {
             panic!("deadline_submit must be before deadline_select");
         }
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
         token_client.transfer(&recruiter, &env.current_contract_address(), &prize);
 
         let mut counter: u64 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0);
@@ -269,8 +273,7 @@ impl EventContract {
         }
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         let commission = event.prize / 10; // 10%
         let payout = event.prize - commission;
@@ -347,8 +350,7 @@ impl EventContract {
         let payout = event.prize - commission;
 
         let platform: Address = env.storage().instance().get(&DataKey::PlatformAddr).unwrap();
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_addr);
+        let token_client = token::Client::new(&env, &Self::get_token_address(&env));
 
         token_client.transfer(&env.current_contract_address(), &platform, &commission);
         // La devolución va a la wallet custodial del reclutador
