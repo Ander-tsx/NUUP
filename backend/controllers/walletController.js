@@ -90,17 +90,16 @@ const getBalance = async (req, res) => {
 };
 
 /**
- * Deposit funds: MXN → MXNe conversion.
- * Creates a deposit transaction and increments wallet balance.
+ * Deposit funds: MXN → MXNe conversion via SPEI.
+ * Generates a CLABE for the user to transfer MXN, and creates a pending
+ * Transaction record that is completed when Vibrant confirms the deposit.
  */
 const depositFunds = async (req, res) => {
   try {
-    const { amount_mxn, amount_mxne } = req.body;
+    const { amountMXN } = req.body;
 
-    if (!amount_mxn || !amount_mxne || amount_mxn <= 0 || amount_mxne <= 0) {
-      return res
-        .status(400)
-        .json({ message: "Valid amount_mxn and amount_mxne are required." });
+    if (!amountMXN || Number(amountMXN) <= 0) {
+      return res.status(400).json({ message: "Valid amountMXN is required." });
     }
 
     const wallet = await Wallet.findOne({ user_id: req.userId });
@@ -109,33 +108,39 @@ const depositFunds = async (req, res) => {
         .status(404)
         .json({ message: "Wallet not found! Please create a wallet first." });
 
-    // Create deposit transaction
+    // Generate a CLABE for this deposit session
+    const clabeInfo = await vibrantService.generateDepositCLABE(req.userId, Number(amountMXN));
+
+    // Create pending deposit transaction
     const transaction = new Transaction({
       user_id: req.userId,
-      type: "deposit",
-      amount_mxn,
-      amount_mxne,
-      status: "completed",
-      stellar_tx_hash: `mock_deposit_${Date.now()}`,
+      type: 'deposit',
+      amount_mxn: Number(amountMXN),
+      amount_mxne: Number(amountMXN), // 1:1 MXN → MXNe
+      status: 'pending',
+      stellar_tx_hash: clabeInfo.reference,
+      metadata: {
+        clabe: clabeInfo.clabe,
+        bank: clabeInfo.bank,
+        beneficiary: clabeInfo.beneficiary,
+        reference: clabeInfo.reference,
+        expires_at: clabeInfo.expires_at,
+      }
     });
     await transaction.save();
 
-    // Update wallet balance
-    wallet.balance_mxne += amount_mxne;
-    await wallet.save();
-
-    await createNotification(
-      req.userId,
-      "payment",
-      "Depósito exitoso",
-      `Se depositaron ${amount_mxne} MXNe a tu wallet.`,
-      transaction._id,
-    );
-
     res.status(201).json({
-      message: "Deposit successful.",
+      success: true,
+      data: {
+        clabe: clabeInfo.clabe,
+        bank: clabeInfo.bank,
+        beneficiary: clabeInfo.beneficiary,
+        amount: Number(amountMXN),
+        reference: clabeInfo.reference,
+        expires_at: clabeInfo.expires_at,
+        instructions: `Transfiere exactamente MX$${Number(amountMXN).toFixed(2)} a la CLABE indicada desde cualquier banco mexicano.`,
+      },
       transaction,
-      new_balance: wallet.balance_mxne,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -243,26 +248,63 @@ const withdrawFunds = async (req, res) => {
 
 /**
  * POST /wallets/vibrant/webhook
- * Handles payout status updates sent by Vibrant.
+ * Handles payout status updates and deposit confirmations sent by Vibrant.
  */
 const handleVibrantWebhook = async (req, res) => {
   try {
-    if (!vibrantService.verifyWebhookSecret(req)) {
-      return res.status(401).json({ error: "Unauthorized webhook." });
+    // 1. Verify HMAC signature — reject if invalid
+    const signature = req.headers['x-vibrant-signature'];
+    if (!vibrantService.verifyWebhookSignature(req.rawBody, signature, process.env.VIBRANT_WEBHOOK_SECRET)) {
+      return res.status(401).json({ error: 'Invalid signature' });
     }
 
     const { type, data } = req.body || {};
     if (!type || !data)
       return res.status(400).json({ error: "Invalid webhook payload." });
 
-    if (type === "payout.completed") {
-      const tx = await Transaction.findOne({
-        "metadata.vibrant_payout_ref": data.reference,
-      });
-      if (!tx)
-        return res
-          .status(404)
-          .json({ error: "Transaction not found for payout reference." });
+    // 2. Process deposit.confirmed events
+    if (type === 'deposit.confirmed') {
+      // 3. Find the pending transaction by reference
+      const reference = data.reference;
+      const tx = await Transaction.findOne({ 'metadata.reference': reference });
+      if (!tx) return res.status(404).json({ error: 'Transaction not found for reference.' });
+
+      // Idempotency: if already completed, do not double-credit.
+      if (tx.status === 'completed') {
+        return res.status(200).json({ received: true, duplicate: true });
+      }
+
+      // 4. Credit MXNe to the user's Stellar wallet on-chain
+      const wallet = await Wallet.findOne({ user_id: tx.user_id });
+      if (!wallet) return res.status(404).json({ error: 'Wallet not found for user.' });
+
+      const amountMXNe = data.amount_mxne || tx.amount_mxne;
+      const txHash = await vibrantService.creditMXNeToWallet(wallet.stellar_address, amountMXNe);
+
+      // 5. Mark transaction as completed
+      tx.status = 'completed';
+      tx.stellar_tx_hash = txHash;
+      tx.metadata = {
+        ...(tx.metadata || {}),
+        vibrant_deposit_ref: data.deposit_id || reference,
+      };
+      await tx.save();
+
+      // 6. Send notification to user
+      await createNotification(
+        tx.user_id,
+        'payment',
+        'Depósito confirmado',
+        `Tu depósito de ${data.amount_mxn || tx.amount_mxn} MXN ha sido acreditado.`,
+        tx._id
+      );
+
+      return res.status(200).json({ received: true });
+    }
+
+    if (type === 'payout.completed') {
+      const tx = await Transaction.findOne({ 'metadata.vibrant_payout_ref': data.reference });
+      if (!tx) return res.status(404).json({ error: 'Transaction not found for payout reference.' });
 
       tx.status = "completed";
       await tx.save();

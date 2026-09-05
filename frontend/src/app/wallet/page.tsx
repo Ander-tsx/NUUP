@@ -31,6 +31,16 @@ export default function WalletPage() {
   const [withdrawClabe, setWithdrawClabe] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [showWithdrawProcessingHint, setShowWithdrawProcessingHint] = useState(false);
+  const [depositInfo, setDepositInfo] = useState<{
+    clabe: string;
+    bank: string;
+    beneficiary: string;
+    amount: number;
+    reference: string;
+    expires_at: string;
+    instructions: string;
+  } | null>(null);
+  const [countdown, setCountdown] = useState(0);
 
   const normalizeClabe = (value: string) => value.replace(/\D/g, '').slice(0, 18);
   const isClabeLengthValid = withdrawClabe.length === 18;
@@ -55,15 +65,44 @@ export default function WalletPage() {
     const amount = Number(depositAmount);
     if (!amount || amount <= 0) return;
     setActionLoading(true);
-    const promise = api.post('/wallets/deposit', { amount_mxn: amount, amount_mxne: amount });
+    const promise = api.post('/wallets/deposit', { amountMXN: amount });
     sileo.promise(promise, {
-      loading: { title: 'Procesando depósito...' },
-      success: { title: 'Depósito exitoso', description: `${formatMXN(amount)} MXNe acreditados` },
-      error:   { title: 'Error al depositar' },
+      loading: { title: 'Generando CLABE...' },
+      success: { title: 'CLABE generada', description: 'Transfiere el monto indicado para acreditar tu depósito.' },
+      error:   { title: 'Error al generar depósito' },
     });
-    try { await promise; setDepositAmount(''); await fetchWallet(); } catch {}
+    try {
+      const res = await promise;
+      const data = res.data?.data;
+      if (data) {
+        setDepositInfo(data);
+        const expires = new Date(data.expires_at).getTime();
+        setCountdown(Math.max(0, Math.floor((expires - Date.now()) / 1000)));
+      }
+      setDepositAmount('');
+      await fetchWallet();
+    } catch {}
     setActionLoading(false);
   };
+
+  // Countdown timer for the pending deposit CLABE
+  useEffect(() => {
+    if (!depositInfo || countdown <= 0) return;
+    const t = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [depositInfo, countdown]);
+
+  // Poll balance every 30s while a deposit is pending to detect confirmation
+  useEffect(() => {
+    if (!depositInfo) return;
+    const poll = setInterval(async () => {
+      try {
+        await api.get('/wallets/balance');
+        await fetchWallet();
+      } catch {}
+    }, 30000);
+    return () => clearInterval(poll);
+  }, [depositInfo]);
 
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
@@ -179,12 +218,67 @@ export default function WalletPage() {
                 </div>
                 <h3 className="text-sm font-semibold text-white">Depositar</h3>
               </div>
-              <div className="space-y-3">
-                <Input label="Monto (MXN)" type="number" placeholder="1000" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} />
-                <Button className="w-full" onClick={handleDeposit} loading={actionLoading} disabled={!depositAmount || Number(depositAmount) <= 0}>
-                  Depositar fondos
-                </Button>
-              </div>
+
+              {depositInfo ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl p-4" style={{ border: '1px solid var(--border)', background: 'rgba(74,222,128,0.05)' }}>
+                    <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--text-3)' }}>
+                      Esperando confirmación...
+                    </p>
+                    <p className="text-sm text-white mb-1">{depositInfo.instructions}</p>
+                    <div className="mt-3 space-y-1.5 text-sm">
+                      <div className="flex justify-between">
+                        <span style={{ color: 'var(--text-3)' }}>CLABE</span>
+                        <span className="font-mono text-white">{depositInfo.clabe}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span style={{ color: 'var(--text-3)' }}>Banco</span>
+                        <span className="text-white">{depositInfo.bank}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span style={{ color: 'var(--text-3)' }}>Beneficiario</span>
+                        <span className="text-white">{depositInfo.beneficiary}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span style={{ color: 'var(--text-3)' }}>Monto</span>
+                        <span className="text-white font-semibold">{formatMXN(depositInfo.amount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span style={{ color: 'var(--text-3)' }}>Referencia</span>
+                        <span className="font-mono text-white">{depositInfo.reference}</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                      <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                        La CLABE expira en{' '}
+                        <span className="font-semibold text-[#60b8f0]">
+                          {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+                        </span>
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                        El depósito SPEI puede tardar hasta 30 minutos en confirmarse. Se acreditará automáticamente.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => { setDepositInfo(null); setCountdown(0); }}
+                  >
+                    Nuevo depósito
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <Input label="Monto (MXN)" type="number" placeholder="1000" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} />
+                  <Button className="w-full" onClick={handleDeposit} loading={actionLoading} disabled={!depositAmount || Number(depositAmount) <= 0}>
+                    Generar CLABE
+                  </Button>
+                  <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                    Transfiere MXN vía SPEI y recibe MXNe directamente en tu wallet Stellar.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Withdraw */}

@@ -20,6 +20,10 @@ router.get('/transactions', verifyToken, getTransactions);
 router.get('/escrows', verifyToken, getEscrows);
 router.post('/deposit', verifyToken, depositFunds);
 router.post('/withdraw', verifyToken, withdrawFunds);
-router.post('/vibrant/webhook', handleVibrantWebhook);
+// Note: This route needs raw body parsing for HMAC verification.
+// express.raw() must be used (not express.json()) so the raw bytes are
+// available for signature verification.
+router.post('/vibrant-webhook', express.raw({ type: 'application/json' }), handleVibrantWebhook);
+router.post('/vibrant/webhook', express.raw({ type: 'application/json' }), handleVibrantWebhook);
 
 module.exports = router;
