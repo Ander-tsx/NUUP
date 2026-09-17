@@ -15,15 +15,31 @@ interface Category {
   name: string;
 }
 
+type SortBy = 'relevance' | 'score' | 'recent';
+
+interface SkillCount {
+  skill: string;
+  count: number;
+}
+
+const PAGE_SIZE = 12;
+
 export default function FreelancersPage() {
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<SortBy>('score');
   const [minRep, setMinRep] = useState(0);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
   const [freelancers, setFreelancers] = useState<SearchFreelancer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [topSkills, setTopSkills] = useState<SkillCount[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load categories from the real API
+  // Load categories and the most common skills
   useEffect(() => {
     api.get('/categories')
       .then((res) => {
@@ -31,36 +47,56 @@ export default function FreelancersPage() {
         setCategories(Array.isArray(cats) ? cats : []);
       })
       .catch(() => { });
+    api.get('/users/freelancers/skills')
+      .then((res) => setTopSkills(Array.isArray(res.data?.data) ? res.data.data.slice(0, 10) : []))
+      .catch(() => { });
   }, []);
+
+  // Debounce the text query so the API is not hit on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Default to relevance while searching, reputation otherwise
+  useEffect(() => {
+    setSortBy(debouncedSearch ? 'relevance' : 'score');
+  }, [debouncedSearch]);
+
+  // Any filter change goes back to the first page
+  useEffect(() => { setPage(1); }, [debouncedSearch, selectedCategoryId, selectedSkills, sortBy, minRep]);
 
   const fetchFreelancers = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      // Filter by reputation category_id — matches SearchIndexFreelancers.categories array
+      if (debouncedSearch) params.set('q', debouncedSearch);
       if (selectedCategoryId) params.set('category_id', selectedCategoryId);
-      if (minRep > 0) params.set('min_reputation', String(minRep));
-      params.set('limit', '50');
+      if (selectedSkills.length) params.set('skills', selectedSkills.join(','));
+      if (minRep > 0) params.set('minScore', String(minRep));
+      params.set('sortBy', sortBy);
+      params.set('page', String(page));
+      params.set('limit', String(PAGE_SIZE));
       const res = await api.get(`/users/search/freelancers?${params.toString()}`);
-      const payload = res.data?.data ?? res.data;
-      setFreelancers(Array.isArray(payload?.freelancers) ? payload.freelancers : Array.isArray(payload) ? payload : []);
+      const payload = res.data?.data ?? {};
+      setFreelancers(Array.isArray(payload.freelancers) ? payload.freelancers : []);
+      setTotal(payload.pagination?.total ?? payload.total ?? 0);
+      setPages(Math.max(payload.pagination?.pages ?? 1, 1));
     } catch {
       setFreelancers([]);
+      setTotal(0);
+      setPages(1);
     } finally {
       setLoading(false);
     }
-  }, [selectedCategoryId, minRep]);
+  }, [debouncedSearch, selectedCategoryId, selectedSkills, minRep, sortBy, page]);
 
   useEffect(() => { fetchFreelancers(); }, [fetchFreelancers]);
 
-  // Client-side search filter (by username/bio)
-  const filtered = freelancers.filter((f) => {
-    if (!search) return true;
-    const name = f.user_id?.username || '';
-    const bio = f.user_id?.bio || '';
-    const q = search.toLowerCase();
-    return name.toLowerCase().includes(q) || bio.toLowerCase().includes(q);
-  });
+  const toggleSkill = (skill: string) =>
+    setSelectedSkills((prev) => (prev.includes(skill) ? prev.filter((s) => s !== skill) : [...prev, skill]));
+
+  const filtered = freelancers;
 
   return (
     <ProtectedRoute>
@@ -87,13 +123,49 @@ export default function FreelancersPage() {
           <div className="animate-fade-up delay-100 space-y-4 mb-8">
             {/* Search */}
             <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: 'var(--text-3)' }} />
               <input
                 type="text"
-                placeholder="Buscar por nombre…"
+                placeholder="Buscar por nombre, skills o descripción…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="input-base pl-10"
               />
+            </div>
+
+            {/* Skill chips (top 10) + sort */}
+            <div className="flex flex-wrap items-center gap-2">
+              {topSkills.map(({ skill, count }) => {
+                const active = selectedSkills.includes(skill);
+                return (
+                  <button
+                    key={skill}
+                    onClick={() => toggleSkill(skill)}
+                    className="px-3 py-1 rounded-full text-xs font-medium transition-all duration-200"
+                    style={active ? {
+                      background: 'rgba(33,133,213,0.18)',
+                      color: '#60b8f0',
+                      border: '1px solid rgba(33,133,213,0.45)',
+                    } : {
+                      background: 'var(--surface-2)',
+                      color: 'var(--text-3)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    {skill} <span className="opacity-60">{count}</span>
+                  </button>
+                );
+              })}
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                className="input-base ml-auto w-auto py-1.5 text-xs"
+                aria-label="Ordenar"
+              >
+                <option value="relevance" disabled={!debouncedSearch}>Más relevante</option>
+                <option value="score">Mejor reputación</option>
+                <option value="recent">Más reciente</option>
+              </select>
             </div>
 
             {/* Category pills — loaded from real /categories API */}
@@ -178,13 +250,18 @@ export default function FreelancersPage() {
           </div>
 
           {/* Results */}
+          {!loading && (
+            <p className="text-xs mb-4" style={{ color: 'var(--text-3)' }}>
+              {total} {total === 1 ? 'freelancer encontrado' : 'freelancers encontrados'}
+            </p>
+          )}
           {loading ? (
             <div className="flex justify-center py-20"><Spinner size="lg" /></div>
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={Users}
               title="Sin freelancers"
-              description={selectedCategoryId
+              description={selectedCategoryId && !debouncedSearch && !selectedSkills.length
                 ? `Ningún freelancer tiene reputación en ${categories.find(c => c._id === selectedCategoryId)?.name || 'esta categoría'} aún.`
                 : 'No se encontraron freelancers con estos filtros.'}
             />
@@ -195,6 +272,31 @@ export default function FreelancersPage() {
                   <FreelancerCard freelancer={f} />
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!loading && pages > 1 && (
+            <div className="flex items-center justify-center gap-3 mt-8">
+              <button
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
+                style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+              >
+                Anterior
+              </button>
+              <span className="text-xs tabular-nums" style={{ color: 'var(--text-3)' }}>
+                Página {page} de {pages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(p + 1, pages))}
+                disabled={page === pages}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
+                style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+              >
+                Siguiente
+              </button>
             </div>
           )}
         </div>

@@ -11,12 +11,14 @@ const {
   updateCompanyProfile,
   requestVerification,
   getRecruiterProfile,
+  getSkillsList,
 } = require("../controllers/userController");
 const { verifyToken } = require("../middleware/jwt");
 const router = express.Router();
 
 router.get("/ranking", getRanking);
 router.get("/search/freelancers", searchFreelancers);
+router.get("/freelancers/skills", getSkillsList);
 router.get("/recruiter/:id", getRecruiterProfile);
 router.put("/company-profile", verifyToken, updateCompanyProfile);
 router.post("/request-verification", verifyToken, requestVerification);

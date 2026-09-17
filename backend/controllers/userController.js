@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const FreelancerProfile = require("../models/FreelancerProfile");
 const RecruiterProfile = require("../models/RecruiterProfile");
@@ -16,6 +17,7 @@ const {
 } = require("../contracts");
 const { encryptSecret } = require("../services/cryptoService");
 const Category = require("../models/Category");
+const { syncFreelancerSearchIndex } = require("../services/searchIndexService");
 
 /**
  * GET /users/:publicKey
@@ -241,17 +243,35 @@ const updateProfile = async (req, res) => {
     await user.save();
 
     // Actualizar perfil según rol
+    // Only profile fields may be updated — never user_id or other internals
+    const pick = (fields) =>
+      Object.fromEntries(
+        fields
+          .filter((f) => req.body[f] !== undefined)
+          .map((f) => [f, req.body[f]]),
+      );
+
     if (user.role === "freelancer") {
       const profile = await FreelancerProfile.findOneAndUpdate(
         { user_id: user._id },
-        { $set: req.body },
-        { new: true },
+        {
+          $set: pick([
+            "title",
+            "description",
+            "skills",
+            "experience_level",
+            "availability",
+            "portfolio_url",
+          ]),
+        },
+        { new: true, runValidators: true },
       );
+      await syncFreelancerSearchIndex(user._id);
       return res.status(200).json({ success: true, data: profile });
     } else if (user.role === "recruiter") {
       const profile = await RecruiterProfile.findOneAndUpdate(
         { user_id: user._id },
-        { $set: req.body },
+        { $set: pick(["company_description", "website"]) },
         { new: true },
       );
       return res.status(200).json({ success: true, data: profile });
@@ -352,64 +372,121 @@ const deleteUser = async (req, res) => {
 
 /**
  * GET /users/search/freelancers
- * Retorna todos los freelancers del índice de búsqueda con filtros opcionales.
- * Query params: category_id, min_reputation, limit, page
+ * Query: q (full-text), skills (comma-separated, all required), category_id,
+ * minScore | min_reputation, sortBy (relevance | score | recent), page, limit.
+ * Uses the weighted text index on SearchIndexFreelancers — no regex scans.
  */
 const searchFreelancers = async (req, res) => {
   try {
-    const { category_id, min_reputation, limit = 50, page = 1 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const {
+      q,
+      skills,
+      category_id,
+      minScore,
+      min_reputation,
+      sortBy,
+    } = req.query;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 12, 1), 50);
+    const query = String(q || "").trim();
 
     const filter = {};
-    if (category_id) filter.categories = category_id;
-    if (min_reputation)
-      filter.reputation_score = { $gte: Number(min_reputation) };
+    if (query) filter.$text = { $search: query };
+    if (skills) {
+      const skillList = String(skills)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (skillList.length) filter.skills = { $all: skillList };
+    }
+    if (category_id && mongoose.isValidObjectId(category_id)) {
+      filter.categories = category_id;
+    }
+    const minRep = Number(minScore ?? min_reputation);
+    if (minRep > 0) filter.reputation_score = { $gte: minRep };
 
-    const freelancers = await SearchIndexFreelancers.find(filter)
-      .populate("user_id", "username profile_image bio stellar_public_key")
-      .populate("categories", "name slug icon")
-      .sort({ reputation_score: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    let sort;
+    if (query && (!sortBy || sortBy === "relevance")) {
+      sort = { score: { $meta: "textScore" }, reputation_score: -1 };
+    } else if (sortBy === "recent") {
+      sort = { created_at: -1 };
+    } else {
+      sort = { reputation_score: -1, created_at: -1 };
+    }
 
-    // Para cada freelancer, obtener sus reputaciones por categoría desde el modelo Reputation
+    const projection = query ? { score: { $meta: "textScore" } } : {};
+    const [freelancers, total] = await Promise.all([
+      SearchIndexFreelancers.find(filter, projection)
+        .populate("user_id", "username profile_image bio stellar_public_key")
+        .populate("categories", "name slug icon")
+        .sort(sort)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      SearchIndexFreelancers.countDocuments(filter),
+    ]);
+
+    // Reputation per category and professional title for each result
     const { Reputation } = require("../models/Reputation");
     const userIds = freelancers.map((f) => f.user_id?._id).filter(Boolean);
-    const reputations = await Reputation.find({ user_id: { $in: userIds } })
-      .populate("category_id", "name slug icon")
-      .lean();
+    const [reputations, profiles] = await Promise.all([
+      Reputation.find({ user_id: { $in: userIds } })
+        .populate("category_id", "name slug icon")
+        .lean(),
+      FreelancerProfile.find({ user_id: { $in: userIds } })
+        .select("user_id title")
+        .lean(),
+    ]);
 
-    // Agrupar reputaciones por user_id
     const repMap = {};
     for (const rep of reputations) {
       const uid = rep.user_id.toString();
-      if (!repMap[uid]) repMap[uid] = [];
-      repMap[uid].push({
+      (repMap[uid] ||= []).push({
         category: rep.category_id,
         score: rep.score,
         level: rep.level,
       });
     }
+    const titleMap = Object.fromEntries(
+      profiles.map((p) => [p.user_id.toString(), p.title || ""]),
+    );
 
-    // Cargar títulos profesionales de FreelancerProfile
-    const profiles = await FreelancerProfile.find({ user_id: { $in: userIds } })
-      .select("user_id title")
-      .lean();
-    const titleMap = {};
-    for (const p of profiles) titleMap[p.user_id.toString()] = p.title || "";
-
-    // Inyectar reputaciones_por_categoria en cada freelancer
-    const enriched = freelancers.map((f) => ({
-      ...f,
-      title: titleMap[f.user_id?._id?.toString()] || "",
-      reputation_by_category: repMap[f.user_id?._id?.toString()] || [],
-    }));
+    const enriched = freelancers.map((f) => {
+      const uid = f.user_id?._id?.toString();
+      return {
+        ...f,
+        title: titleMap[uid] || f.title || "",
+        reputation_by_category: repMap[uid] || [],
+      };
+    });
 
     res.status(200).json({
       success: true,
-      data: { freelancers: enriched, total: enriched.length },
+      data: {
+        freelancers: enriched,
+        total,
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      },
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * GET /users/freelancers/skills
+ * Most common freelancer skills, used for the search filter chips.
+ */
+const getSkillsList = async (req, res) => {
+  try {
+    const skills = await SearchIndexFreelancers.aggregate([
+      { $unwind: "$skills" },
+      { $group: { _id: "$skills", count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 30 },
+      { $project: { _id: 0, skill: "$_id", count: 1 } },
+    ]);
+    res.status(200).json({ success: true, data: skills });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -593,4 +670,5 @@ module.exports = {
   updateCompanyProfile,
   requestVerification,
   getRecruiterProfile,
+  getSkillsList,
 };

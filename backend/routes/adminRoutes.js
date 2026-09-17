@@ -7,6 +7,7 @@ const { verifyToken, verifyRole } = require("../middleware/jwt");
 const User = require("../models/User");
 const FreelancerProfile = require("../models/FreelancerProfile");
 const SearchIndexFreelancers = require("../models/SearchIndexFreelancers");
+const { syncFreelancerSearchIndex } = require("../services/searchIndexService");
 const { Reputation } = require("../models/Reputation");
 const { Project } = require("../models/Project");
 const { EventParticipant } = require("../models/Event");
@@ -84,6 +85,7 @@ router.post("/backfill-freelancers", async (req, res) => {
         await SearchIndexFreelancers.create(indexData);
         created++;
       }
+      await syncFreelancerSearchIndex(user._id);
     }
 
     res.status(200).json({

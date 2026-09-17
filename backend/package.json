@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "test": "node tests/cryptoService.test.js",
     "bootstrap": "node scripts/bootstrap-dev.js",
-    "simulate:deposit": "node scripts/simulate-vibrant-deposit.js"
+    "simulate:deposit": "node scripts/simulate-vibrant-deposit.js",
+    "search:index": "node scripts/create-search-index.js"
   },
   "keywords": [],
   "author": "",
