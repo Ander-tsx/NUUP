@@ -11,6 +11,7 @@ const projectSchema = new mongoose.Schema({
   deadline: { type: Date, required: true },
   status: { type: String, enum: ['proposed', 'active', 'review', 'completed', 'rejected', 'disputed'], default: 'proposed' },
   soroban_project_id: { type: String },
+  on_chain_id: { type: String, default: null }, // ProjectContract id (u64 as string)
   correction_used: { type: Boolean, default: false }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

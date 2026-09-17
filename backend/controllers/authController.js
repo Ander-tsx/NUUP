@@ -7,9 +7,25 @@ const SearchIndexFreelancers = require("../models/SearchIndexFreelancers");
 const { Keypair } = require("@stellar/stellar-sdk");
 const { registerUser, isActiveByWallet } = require("../contracts");
 const { encryptSecret } = require("../services/cryptoService");
+const {
+  fundTestnetAccount,
+  ensureAssetTrustline,
+} = require("../services/stellarService");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+
+async function prepareTestnetWallet(secret, publicKey) {
+  const funded = await fundTestnetAccount(publicKey);
+  if (!funded) throw new Error(`Friendbot could not fund ${publicKey}`);
+  if (process.env.MXNE_ASSET_ISSUER) {
+    await ensureAssetTrustline(
+      secret,
+      process.env.MXNE_ASSET_CODE || "MXNE",
+      process.env.MXNE_ASSET_ISSUER,
+    );
+  }
+}
 
 /**
  * POST /auth/register
@@ -95,6 +111,14 @@ const register = async (req, res) => {
       encrypted_secret: encryptedSecret,
     });
     await wallet.save();
+
+    // Testnet: fund the custodial account (Friendbot) and open the MXNe
+    // trustline in the background so registration stays fast.
+    if (process.env.NETWORK !== "mainnet") {
+      prepareTestnetWallet(keypair.secret(), stellarPublicKey).catch((err) =>
+        console.error("Testnet wallet setup failed:", err.message),
+      );
+    }
 
     // Emitir JWT — access token short-lived (15m); refresh token handles long-term sessions
     const accessToken = jwt.sign(

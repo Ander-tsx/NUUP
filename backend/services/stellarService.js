@@ -326,7 +326,58 @@ async function sendAssetPayment(senderSecret, destinationPubKey, amount, assetCo
   return submitData.hash;
 }
 
+/**
+ * Makes sure a custodial account trusts an issued asset (e.g. MXNe) so it can
+ * receive payments. No-op when the trustline already exists.
+ *
+ * @param {string} accountSecret  Raw Stellar secret key of the account (S...)
+ * @param {string} assetCode
+ * @param {string} assetIssuer
+ * @returns {Promise<string|null>} Transaction hash, or null if nothing was needed
+ */
+async function ensureAssetTrustline(accountSecret, assetCode, assetIssuer) {
+  const { Keypair: KP, TransactionBuilder: TB, Networks, Operation, Asset, Account } = require('@stellar/stellar-sdk');
+
+  const isTestnet = process.env.NETWORK !== 'mainnet';
+  const horizonUrl = isTestnet ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org';
+  const passphrase = isTestnet ? Networks.TESTNET : Networks.PUBLIC;
+
+  const keypair = KP.fromSecret(accountSecret);
+  if (keypair.publicKey() === assetIssuer) return null; // issuers don't need a trustline
+
+  const accountRes = await fetch(`${horizonUrl}/accounts/${keypair.publicKey()}`);
+  if (!accountRes.ok) throw new Error(`Account not found on Stellar: ${keypair.publicKey()}`);
+  const accountData = await accountRes.json();
+
+  const hasTrustline = (accountData.balances || []).some(
+    (b) => b.asset_code === assetCode && b.asset_issuer === assetIssuer
+  );
+  if (hasTrustline) return null;
+
+  const tx = new TB(new Account(keypair.publicKey(), accountData.sequence), {
+    fee: '100',
+    networkPassphrase: passphrase,
+  })
+    .addOperation(Operation.changeTrust({ asset: new Asset(assetCode, assetIssuer) }))
+    .setTimeout(30)
+    .build();
+  tx.sign(keypair);
+
+  const submitRes = await fetch(`${horizonUrl}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `tx=${encodeURIComponent(tx.toXDR())}`,
+  });
+  const submitData = await submitRes.json();
+  if (!submitRes.ok) {
+    const resultCodes = submitData?.extras?.result_codes;
+    throw new Error(`Stellar trustline tx failed: ${JSON.stringify(resultCodes || submitData)}`);
+  }
+  return submitData.hash;
+}
+
 module.exports = {
+    ensureAssetTrustline,
     submitContractCall,
     distributeEventPrize,
     lockProjectFunds,

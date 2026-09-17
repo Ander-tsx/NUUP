@@ -5,10 +5,10 @@ const cookieParser = require('cookie-parser');
 const http = require('http');
 const { Server } = require('socket.io');
 
+// Load .env before any module that reads process.env at require time
+dotenv.config();
 
 const { apiLimiter } = require('./middleware/rateLimiter');
-
-dotenv.config();
 
 const app = express();
 const httpServer = http.createServer(app);

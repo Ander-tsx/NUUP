@@ -1,61 +1,98 @@
 #!/usr/bin/env bash
+# Deploys and wires the four NUUP contracts on a Stellar test network.
+#
+#   ./deploy_v3.sh               # testnet, identities "nuup-admin" / "nuup-platform"
+#   NETWORK=testnet ADMIN_IDENTITY=me ./deploy_v3.sh
+#
+# Steps: build WASM → fund identities → issue a test MXNe asset (issuer = platform)
+# → wrap it as a SAC → deploy WalletRegistry, ReputationLedger, EventContract,
+# ProjectContract → initialize → authorize Event/Project on ReputationLedger.
+# The backend variables are written to .env.testnet (git-ignored).
 set -euo pipefail
 
-# Load environment variables
-source .env 2>/dev/null || true
+cd "$(dirname "$0")"
 
-NETWORK="${STELLAR_NETWORK:-testnet}"
-ADMIN_ADDRESS="${ADMIN_STELLAR_ADDRESS:?ADMIN_STELLAR_ADDRESS must be set}"
-MXNE_TOKEN="${MXNE_TOKEN_ADDRESS:?MXNE_TOKEN_ADDRESS must be set}"
-IDENTITY="${STELLAR_IDENTITY:-deployer}"
+NETWORK="${NETWORK:-testnet}"
+ADMIN_IDENTITY="${ADMIN_IDENTITY:-nuup-admin}"
+PLATFORM_IDENTITY="${PLATFORM_IDENTITY:-nuup-platform}"
+MXNE_CODE="${MXNE_ASSET_CODE:-MXNE}"
+OUT_FILE="${OUT_FILE:-.env.testnet}"
+WASM_DIR="target/wasm32v1-none/release"
 
-echo "Deploying contracts to $NETWORK..."
+ensure_identity() {
+  local name="$1"
+  if ! stellar keys public-key "$name" >/dev/null 2>&1; then
+    echo "→ Generating identity $name"
+    stellar keys generate "$name" --network "$NETWORK" --fund >/dev/null
+  else
+    stellar keys fund "$name" --network "$NETWORK" >/dev/null 2>&1 || true
+  fi
+}
 
-# Build contracts
+deploy_wasm() {
+  stellar contract deploy --wasm "$WASM_DIR/$1.wasm" --source "$ADMIN_IDENTITY" --network "$NETWORK" 2>/dev/null
+}
+
+invoke() {
+  local id="$1"; shift
+  stellar contract invoke --id "$id" --source "$ADMIN_IDENTITY" --network "$NETWORK" -- "$@" >/dev/null
+}
+
 echo "Building contracts..."
-cargo build --release --target wasm32-unknown-unknown
+stellar contract build >/dev/null
 
-# Deploy WalletRegistry
+ensure_identity "$ADMIN_IDENTITY"
+ensure_identity "$PLATFORM_IDENTITY"
+ADMIN_ADDRESS=$(stellar keys public-key "$ADMIN_IDENTITY")
+PLATFORM_ADDRESS=$(stellar keys public-key "$PLATFORM_IDENTITY")
+echo "Admin:    $ADMIN_ADDRESS"
+echo "Platform: $PLATFORM_ADDRESS (MXNe issuer)"
+
+echo "Wrapping ${MXNE_CODE}:${PLATFORM_ADDRESS} as Stellar Asset Contract..."
+MXNE_TOKEN_ADDRESS=$(stellar contract id asset --asset "${MXNE_CODE}:${PLATFORM_ADDRESS}" --network "$NETWORK")
+stellar contract asset deploy --asset "${MXNE_CODE}:${PLATFORM_ADDRESS}" --source "$PLATFORM_IDENTITY" \
+  --network "$NETWORK" >/dev/null 2>&1 || echo "  (SAC already deployed)"
+echo "MXNe SAC: $MXNE_TOKEN_ADDRESS"
+
 echo "Deploying WalletRegistry..."
-WALLET_REGISTRY_ID=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/wallet_registry.wasm \
-  --source "$IDENTITY" \
-  --network "$NETWORK")
-echo "WalletRegistry: $WALLET_REGISTRY_ID"
+WALLET_REGISTRY_CONTRACT_ID=$(deploy_wasm wallet_registry)
+invoke "$WALLET_REGISTRY_CONTRACT_ID" initialize --admin "$ADMIN_ADDRESS"
 
-# Deploy EventContract
+echo "Deploying ReputationLedger..."
+REPUTATION_CONTRACT_ID=$(deploy_wasm reputation_ledger)
+invoke "$REPUTATION_CONTRACT_ID" initialize --admin "$ADMIN_ADDRESS" \
+  --wallet_registry_addr "$WALLET_REGISTRY_CONTRACT_ID"
+
 echo "Deploying EventContract..."
-EVENT_CONTRACT_ID=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/event_contract.wasm \
-  --source "$IDENTITY" \
-  --network "$NETWORK")
+EVENT_CONTRACT_ID=$(deploy_wasm event_contract)
+invoke "$EVENT_CONTRACT_ID" initialize --admin "$ADMIN_ADDRESS" --token_address "$MXNE_TOKEN_ADDRESS" \
+  --reputation_addr "$REPUTATION_CONTRACT_ID" --platform_addr "$PLATFORM_ADDRESS" \
+  --wallet_registry_addr "$WALLET_REGISTRY_CONTRACT_ID"
 
-stellar contract invoke \
-  --id "$EVENT_CONTRACT_ID" \
-  --source "$IDENTITY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS" \
-  --token_address "$MXNE_TOKEN"
-echo "EventContract: $EVENT_CONTRACT_ID"
-
-# Deploy ProjectContract
 echo "Deploying ProjectContract..."
-PROJECT_CONTRACT_ID=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/project_contract.wasm \
-  --source "$IDENTITY" \
-  --network "$NETWORK")
+PROJECT_CONTRACT_ID=$(deploy_wasm project_contract)
+invoke "$PROJECT_CONTRACT_ID" initialize --admin "$ADMIN_ADDRESS" --token_address "$MXNE_TOKEN_ADDRESS" \
+  --reputation_addr "$REPUTATION_CONTRACT_ID" --platform_addr "$PLATFORM_ADDRESS" \
+  --wallet_registry_addr "$WALLET_REGISTRY_CONTRACT_ID"
 
-stellar contract invoke \
-  --id "$PROJECT_CONTRACT_ID" \
-  --source "$IDENTITY" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$ADMIN_ADDRESS" \
-  --token_address "$MXNE_TOKEN"
-echo "ProjectContract: $PROJECT_CONTRACT_ID"
+echo "Authorizing Event/Project contracts on ReputationLedger..."
+invoke "$REPUTATION_CONTRACT_ID" authorize_contract --contract "$EVENT_CONTRACT_ID"
+invoke "$REPUTATION_CONTRACT_ID" authorize_contract --contract "$PROJECT_CONTRACT_ID"
+
+cat > "$OUT_FILE" <<EOF
+# Generated by deploy_v3.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ) — network: $NETWORK
+NETWORK=$NETWORK
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+WALLET_REGISTRY_CONTRACT_ID=$WALLET_REGISTRY_CONTRACT_ID
+REPUTATION_CONTRACT_ID=$REPUTATION_CONTRACT_ID
+EVENT_CONTRACT_ID=$EVENT_CONTRACT_ID
+PROJECT_CONTRACT_ID=$PROJECT_CONTRACT_ID
+MXNE_TOKEN_ADDRESS=$MXNE_TOKEN_ADDRESS
+MXNE_ASSET_CODE=$MXNE_CODE
+MXNE_ASSET_ISSUER=$PLATFORM_ADDRESS
+ADMIN_SECRET=$(stellar keys secret "$ADMIN_IDENTITY")
+PLATFORM_SECRET=$(stellar keys secret "$PLATFORM_IDENTITY")
+EOF
 
 echo ""
-echo "✅ Deployment complete. Add these to your .env:"
-echo "EVENT_CONTRACT_ID=$EVENT_CONTRACT_ID"
-echo "PROJECT_CONTRACT_ID=$PROJECT_CONTRACT_ID"
+echo "✅ Deployment complete. Backend variables written to soroban-contracts/$OUT_FILE"

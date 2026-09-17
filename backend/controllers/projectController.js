@@ -117,13 +117,20 @@ const createProject = async (req, res) => {
       const recruiterKeypair = Keypair.fromSecret(
         decryptSecret(wallet.encrypted_secret),
       );
+      // On-chain reputation is keyed by the category slug (Symbol)
+      const categoryDoc = category_id
+        ? await require("../models/Category").findById(category_id)
+        : null;
+      const onChainCategory = categoryDoc?.slug || "general";
+      // Contract expects a unix timestamp in seconds; the API receives a date
+      const deadlineSeconds = Math.floor(new Date(deadline).getTime() / 1000);
       onChainProjectId = await contracts.createProject(
         recruiterKeypair,
         freelancerPK,
         amount,
         guarantee || 0,
-        deadline,
-        category || "general",
+        deadlineSeconds,
+        category || onChainCategory,
       );
     } catch (contractErr) {
       console.error("Error on-chain createProject:", contractErr.message);

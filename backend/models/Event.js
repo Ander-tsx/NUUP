@@ -11,7 +11,8 @@ const eventSchema = new mongoose.Schema({
   deadline_submission: { type: Date, required: true },
   deadline_selection: { type: Date, required: true },
   status: { type: String, enum: ['draft', 'active', 'completed', 'cancelled'], default: 'draft' },
-  soroban_event_id: { type: String }
+  soroban_event_id: { type: String },
+  on_chain_id: { type: String, default: null } // EventContract id (u64 as string)
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 const eventParticipantSchema = new mongoose.Schema({

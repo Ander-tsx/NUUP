@@ -114,7 +114,8 @@ const createEvent = async (req, res) => {
       deadline_submission: eventDeadlineSubmit,
       deadline_selection: eventDeadlineSelect,
       status: "active",
-      on_chain_id: stellarTxHash || null,
+      // on_chain_id is the EventContract numeric id; the XLM escrow hash lives on Escrow
+      on_chain_id: null,
     });
 
     const savedEvent = await newEvent.save();

@@ -16,7 +16,9 @@ const toI128 = (n) => nativeToScVal(BigInt(n), { type: 'i128' });
 const toU32 = (n) => nativeToScVal(n, { type: 'u32' });
 
 // Symbol (category)
-const toSymbol = (str) => xdr.ScVal.scvSymbol(str);
+// Soroban symbols only allow [A-Za-z0-9_] (max 32), so slugs like "diseno-digital" are normalized
+const toSymbol = (str) =>
+  xdr.ScVal.scvSymbol(String(str).replace(/[^A-Za-z0-9_]/g, '_').slice(0, 32));
 
 // BytesN<32> (email_hash, entry_hash, delivery_hash)
 const toBytes32 = (hexString) => {

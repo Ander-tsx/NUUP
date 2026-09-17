@@ -1,5 +1,8 @@
 const { Wallet, Transaction, Escrow } = require("../models/Wallet");
-const { getAccountBalances } = require("../services/stellarService");
+const {
+  getAccountBalances,
+  ensureAssetTrustline,
+} = require("../services/stellarService");
 const { createNotification } = require("../services/notificationService");
 const { validateCLABE } = require("../utils/validateCLABE");
 const vibrantService = require("../services/vibrantService");
@@ -309,6 +312,14 @@ const handleVibrantWebhook = async (req, res) => {
       // 4. Credit MXNe to the user's Stellar wallet on-chain
       let txHash;
       try {
+        // Custodial wallets need an MXNe trustline before they can receive it
+        if (MXNE_ASSET_ISSUER) {
+          await ensureAssetTrustline(
+            decryptSecret(wallet.encrypted_secret),
+            MXNE_ASSET_CODE,
+            MXNE_ASSET_ISSUER,
+          );
+        }
         txHash = await vibrantService.creditMXNeToWallet(
           wallet.stellar_address,
           amountMXNe,
