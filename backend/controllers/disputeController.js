@@ -188,6 +188,9 @@ const resolveDispute = async (req, res) => {
     dispute.status = "resolved";
     dispute.resolution = favorFreelancer ? "freelancer" : "recruiter";
     dispute.resolved_by = req.userId;
+    if (req.body.reasoning) {
+      dispute.admin_reasoning = String(req.body.reasoning).trim();
+    }
     await dispute.save();
 
     if (project) {

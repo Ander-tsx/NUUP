@@ -259,6 +259,9 @@ const refresh = async (req, res) => {
 
   const user = await User.findById(session.user_id);
   if (!user) return res.status(403).json({ error: "Usuario no encontrado." });
+  if (user.status !== "active") {
+    return res.status(403).json({ error: `Cuenta ${user.status}.` });
+  }
 
   // Issue new short-lived access token
   const newAccessToken = jwt.sign(

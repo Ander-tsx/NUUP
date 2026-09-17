@@ -7,7 +7,8 @@ const disputeSchema = new mongoose.Schema({
   description: { type: String, required: true },
   status: { type: String, enum: ['open', 'reviewing', 'resolved'], default: 'open' },
   resolution: { type: String, enum: ['freelancer', 'recruiter', 'none'], default: 'none' },
-  resolved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' } // Admin ID
+  resolved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Admin ID
+  admin_reasoning: { type: String }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 const disputeEvidenceSchema = new mongoose.Schema({

@@ -98,7 +98,12 @@ export default function Navbar() {
 
   if (!user) return null;
 
-  const links = user.role === 'recruiter' ? recruiterLinks : freelancerLinks;
+  const links =
+    user.role === 'recruiter'
+      ? recruiterLinks
+      : user.role === 'admin'
+        ? [...freelancerLinks, { href: '/admin', label: 'Admin' }]
+        : freelancerLinks;
   const unread = notifications.filter((n) => !n.read).length;
 
   const handleLogout = async () => {

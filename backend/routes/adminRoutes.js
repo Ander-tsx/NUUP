@@ -1,6 +1,4 @@
-// adminRoutes.js — Development/admin utility endpoints
-// These routes help with data management and debugging.
-// In production, add auth middleware before exposing publicly.
+// adminRoutes.js — Admin-only endpoints (dashboard + data maintenance)
 
 const express = require("express");
 const router = express.Router();
@@ -12,61 +10,19 @@ const SearchIndexFreelancers = require("../models/SearchIndexFreelancers");
 const { Reputation } = require("../models/Reputation");
 const { Project } = require("../models/Project");
 const { EventParticipant } = require("../models/Event");
+const {
+  getUsers,
+  deleteUser,
+  suspendUser,
+  getDisputes,
+  resolveDispute,
+  getStats,
+  getVerificationQueue,
+  verifyCompany,
+} = require("../controllers/adminController");
 
-/**
- * PUT /admin/verify-company/:userId
- * Admin grants the "Empresa verificada" badge to a recruiter.
- * Protected: requires a valid JWT with role === 'admin'.
- */
-router.put(
-  "/verify-company/:userId",
-  verifyToken,
-  verifyRole(["admin"]),
-  async (req, res) => {
-    try {
-      // Filter by role so non-recruiters are never marked as verified
-      const user = await User.findOneAndUpdate(
-        { _id: req.params.userId, role: "recruiter" },
-        {
-          $set: {
-            "company.verified": true,
-            "company.verified_at": new Date(),
-          },
-        },
-        { new: true },
-      ).select("-password_hash");
-
-      if (!user)
-        return res
-          .status(404)
-          .json({ error: "Reclutador no encontrado." });
-
-      // Notify recruiter via email (non-blocking)
-      if (user.email) {
-        try {
-          const {
-            sendEmail,
-            escapeHtml,
-          } = require("../services/emailService");
-          await sendEmail(
-            user.email,
-            "¡Tu empresa fue verificada en Nuup!",
-            `<p>Hola <strong>${escapeHtml(user.username)}</strong>,</p><p>Tu empresa <strong>${escapeHtml(user.company?.name)}</strong> ha sido verificada por el equipo de Nuup. A partir de ahora aparecerá con el badge <strong>✓ Verificado</strong> en todos tus retos y proyectos.</p>`,
-          );
-        } catch (emailErr) {
-          console.error(
-            "[verifyCompany] Email notification failed:",
-            emailErr.message,
-          );
-        }
-      }
-
-      res.status(200).json({ success: true, data: { company: user.company } });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+// Every admin endpoint requires a valid JWT with role === "admin"
+router.use(verifyToken, verifyRole(["admin"]));
 
 /**
  * POST /admin/backfill-freelancers
@@ -382,5 +338,31 @@ router.post("/seed-categories", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Admin Management Routes ──
+
+// GET /admin/users — list all users
+router.get("/users", getUsers);
+
+// DELETE /admin/users/:id — delete a user
+router.delete("/users/:id", deleteUser);
+
+// PUT /admin/users/:id/suspend — suspend/unsuspend a user
+router.put("/users/:id/suspend", suspendUser);
+
+// GET /admin/disputes — list all disputes
+router.get("/disputes", getDisputes);
+
+// POST /admin/disputes/:id/resolve — resolve a dispute
+router.post("/disputes/:id/resolve", resolveDispute);
+
+// GET /admin/stats — platform statistics
+router.get("/stats", getStats);
+
+// GET /admin/verifications — list verification-pending recruiters
+router.get("/verifications", getVerificationQueue);
+
+// PUT /admin/verify-company/:id — mark company as verified
+router.put("/verify-company/:id", verifyCompany);
 
 module.exports = router;
