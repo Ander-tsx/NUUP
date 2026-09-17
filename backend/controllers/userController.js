@@ -415,6 +415,172 @@ const searchFreelancers = async (req, res) => {
   }
 };
 
+/**
+ * PUT /users/company-profile
+ * Recruiters update their company sub-document.
+ * The `verified` field is intentionally excluded — only admins can set it.
+ */
+const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/;
+
+const updateCompanyProfile = async (req, res) => {
+  try {
+    if (req.role !== "recruiter" && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({
+          error: "Solo los reclutadores pueden tener perfil de empresa.",
+        });
+    }
+
+    const {
+      name,
+      rfc,
+      logo_url,
+      website,
+      description,
+      industry,
+      founded_year,
+      employee_count,
+    } = req.body;
+
+    if (rfc && !RFC_REGEX.test(rfc.toUpperCase())) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Formato de RFC inválido. Debe tener 12 caracteres (persona moral) o 13 (persona física).",
+        });
+    }
+
+    const update = {};
+    if (name !== undefined) update["company.name"] = name;
+    if (rfc !== undefined) update["company.rfc"] = rfc.toUpperCase();
+    if (logo_url !== undefined) update["company.logo_url"] = logo_url;
+    if (website !== undefined) update["company.website"] = website;
+    if (description !== undefined) update["company.description"] = description;
+    if (industry !== undefined) update["company.industry"] = industry;
+    if (founded_year !== undefined)
+      update["company.founded_year"] = founded_year;
+    if (employee_count !== undefined)
+      update["company.employee_count"] = employee_count;
+
+    const user = await User.findByIdAndUpdate(
+      req.userId,
+      { $set: update },
+      { new: true, runValidators: true },
+    ).select("-password_hash");
+
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+
+    res.status(200).json({ success: true, data: { company: user.company } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * POST /users/request-verification
+ * Recruiter requests the "Empresa verificada" badge.
+ * Requires company.name and company.rfc to be set first.
+ */
+const requestVerification = async (req, res) => {
+  try {
+    if (req.role !== "recruiter") {
+      return res
+        .status(403)
+        .json({
+          error: "Solo los reclutadores pueden solicitar verificación.",
+        });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+
+    if (!user.company?.name || !user.company?.rfc) {
+      return res.status(400).json({
+        error:
+          "Completa tu nombre de empresa y RFC antes de solicitar verificación.",
+      });
+    }
+
+    if (user.company.verified) {
+      return res.status(400).json({ error: "Tu empresa ya está verificada." });
+    }
+
+    user.company.verification_requested_at = new Date();
+    await user.save();
+
+    // Notify admin via email (non-blocking)
+    if (process.env.ADMIN_EMAIL) {
+      try {
+        const { sendEmail, escapeHtml } = require("../services/emailService");
+        await sendEmail(
+          process.env.ADMIN_EMAIL,
+          `Solicitud de verificación: ${user.company.name}`,
+          `<p>Empresa: <strong>${escapeHtml(user.company.name)}</strong></p><p>RFC: <strong>${escapeHtml(user.company.rfc)}</strong></p><p>Usuario ID: ${user._id}</p><p>Solicitud recibida: ${new Date().toISOString()}</p>`,
+        );
+      } catch (emailErr) {
+        console.error(
+          "[requestVerification] Email to admin failed:",
+          emailErr.message,
+        );
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        message:
+          "Solicitud enviada. El equipo de Nuup revisará tu perfil en 1-2 días hábiles.",
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * GET /users/recruiter/:id
+ * Public recruiter profile — company info + active events/projects.
+ */
+const getRecruiterProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select(
+      "-password_hash -email -company.rfc -company.verification_requested_at",
+    );
+    if (!user)
+      return res.status(404).json({ error: "Reclutador no encontrado." });
+    if (user.role !== "recruiter")
+      return res.status(400).json({ error: "El usuario no es reclutador." });
+
+    const { Event } = require("../models/Event");
+    const { Project } = require("../models/Project");
+
+    const [activeEvents, activeProjects] = await Promise.all([
+      Event.find({ recruiter_id: user._id, status: "active" })
+        .select(
+          "title prize_amount deadline_submission category_id status created_at",
+        )
+        .sort({ created_at: -1 })
+        .limit(10),
+      Project.find({
+        recruiter_id: user._id,
+        status: { $in: ["proposed", "active", "review"] },
+      })
+        .select("title amount deadline status created_at")
+        .sort({ created_at: -1 })
+        .limit(10),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: { user, activeEvents, activeProjects },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   getUser,
   getWalletForUser,
@@ -424,4 +590,7 @@ module.exports = {
   getRanking,
   deleteUser,
   searchFreelancers,
+  updateCompanyProfile,
+  requestVerification,
+  getRecruiterProfile,
 };

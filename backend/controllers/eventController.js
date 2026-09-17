@@ -164,7 +164,10 @@ const getEvents = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const events = await Event.find(query)
-      .populate("recruiter_id", "username email stellar_public_key")
+      .populate(
+        "recruiter_id",
+        "username email stellar_public_key company.name company.verified company.logo_url",
+      )
       .sort({ created_at: -1 })
       .skip(skip)
       .limit(limit);
@@ -187,7 +190,10 @@ const getEvents = async (req, res) => {
 const getEventById = async (req, res) => {
   try {
     const event = await Event.findById(req.params.id)
-      .populate("recruiter_id", "username email stellar_public_key")
+      .populate(
+        "recruiter_id",
+        "username email stellar_public_key company.name company.verified company.logo_url",
+      )
       .populate("category_id");
     if (!event) return res.status(404).json({ error: "Evento no encontrado." });
 

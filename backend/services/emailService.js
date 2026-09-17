@@ -71,4 +71,4 @@ async function sendEmail(to, subject, html) {
   }
 }
 
-module.exports = { sendEmail, loadTemplate };
+module.exports = { sendEmail, loadTemplate, escapeHtml };

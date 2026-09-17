@@ -1,6 +1,44 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+const RFC_REGEX = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/;
+
+const companySchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true },
+    rfc: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      match: [RFC_REGEX, "RFC inválido"],
+    },
+    logo_url: { type: String },
+    website: { type: String },
+    description: { type: String, maxlength: 500 },
+    industry: {
+      type: String,
+      enum: [
+        "Tecnología",
+        "Fintech",
+        "E-commerce",
+        "Salud",
+        "Educación",
+        "Marketing",
+        "Otro",
+      ],
+    },
+    founded_year: { type: Number },
+    employee_count: {
+      type: String,
+      enum: ["1-10", "11-50", "51-200", "200+"],
+    },
+    verified: { type: Boolean, default: false },
+    verified_at: { type: Date },
+    verification_requested_at: { type: Date },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     email: { type: String, unique: true, sparse: true },
@@ -22,6 +60,7 @@ const userSchema = new mongoose.Schema(
     },
     last_login: { type: Date, default: null },
     email_notifications: { type: Boolean, default: true },
+    company: { type: companySchema, default: undefined },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } },
 );

@@ -22,6 +22,7 @@ const recruiterLinks = [
   { href: '/projects', label: 'Proyectos' },
   { href: '/freelancers', label: 'Talentos' },
   { href: '/wallet', label: 'Wallet' },
+  { href: '/settings', label: 'Empresa' },
 ];
 
 function HexLogo() {
