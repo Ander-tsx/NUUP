@@ -98,8 +98,8 @@ Asegúrate de tener instalado lo siguiente antes de comenzar:
 | **Node.js** | 20 LTS | https://nodejs.org |
 | **npm** | 10+ | incluido con Node.js |
 | **Rust** | stable | https://rustup.rs |
-| **Stellar CLI** | latest | `cargo install --locked stellar-cli --features opt` |
-| **MongoDB Atlas** | — | cuenta gratuita en https://cloud.mongodb.com |
+| **Stellar CLI** (brew) | 28+ | `brew install stellar-cli` |
+| **Docker** | — | para MongoDB local (o usa MongoDB Atlas) |
 
 > **Nota:** Para trabajar únicamente en el frontend o backend no necesitas instalar Rust ni Stellar CLI. Solo es necesario para compilar y desplegar contratos.
 
@@ -140,122 +140,89 @@ cp soroban-contracts/.env.example soroban-contracts/.env
 
 Contiene las mismas variables de Stellar/Soroban que el backend (sin `PORT`, `MONGO_URI`, `JWT_SECRET`).
 
-> **Tip:** Si ya desplegaste los contratos con `deploy.sh`, el script escribe automáticamente el `.env` en `soroban-contracts/`.
+> **Tip:** `deploy_v3.sh` escribe las variables de contratos en `soroban-contracts/.env.testnet`.
 
 ---
 
 ## Instalación y puesta en marcha
 
-### 1. Backend (Node.js / Express)
+Guía para correr todo en local contra **Stellar testnet**: MongoDB en Docker, contratos desplegados por script, backend y frontend en modo desarrollo.
+
+### 0. Dependencias del sistema (macOS)
 
 ```bash
-# Instalar dependencias
-cd backend
-npm install
-
-# Configurar variables de entorno
-cp .env.example .env
-# Edita .env con tus credenciales
-
-# Modo desarrollo (con hot-reload via nodemon)
-npm run dev
-
-# Modo producción
-npm start
+brew install rustup stellar-cli
+export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+rustup toolchain install stable --target wasm32v1-none --profile minimal
 ```
 
-El servidor arranca en `http://localhost:5000` (o el puerto definido en `PORT`).
+Docker Desktop debe estar corriendo para MongoDB.
 
-**Verificar que funciona:**
-```bash
-curl http://localhost:5000/api
-# Respuesta esperada: "ProofWork API is running..."
-```
-
----
-
-### 2. Frontend (Next.js)
-
-El frontend corre en el puerto **3001** (configurado en `package.json`).
+### 1. MongoDB local
 
 ```bash
-# Instalar dependencias
-cd frontend
-npm install
-
-# Modo desarrollo
-npm run dev
+docker run -d --name nuup-mongo -p 27017:27017 -v nuup-mongo-data:/data/db mongo:7
+# siguientes veces: docker start nuup-mongo
 ```
 
-Abre `http://localhost:3001` en tu navegador.
-
-> **Variables de entorno del frontend:** si el frontend requiere acceso a la URL del backend, crea un archivo `frontend/.env.local` con:
-> ```
-> NEXT_PUBLIC_API_URL=http://localhost:5000/api
-> ```
-
-**Build de producción:**
-```bash
-npm run build
-npm start
-```
-
----
-
-### 3. Smart Contracts (Soroban / Rust)
-
-> Necesitas **Rust** y **Stellar CLI** instalados (ver [Requisitos previos](#requisitos-previos)).
-
-#### Configurar identidades en Stellar CLI
-
-```bash
-# Crear cuenta administradora (guarda la clave secreta que muestra)
-stellar keys generate admin --network testnet
-
-# Crear cuenta de plataforma
-stellar keys generate platform --network testnet
-
-# Fondear cuentas en testnet (Friendbot)
-stellar keys fund admin --network testnet
-stellar keys fund platform --network testnet
-```
-
-#### Compilar contratos
+### 2. Smart Contracts (Soroban)
 
 ```bash
 cd soroban-contracts
-stellar contract build
+cargo test                # 150 tests
+./deploy_v3.sh            # despliega en testnet y escribe .env.testnet
 ```
 
-Los archivos `.wasm` se generan en `target/wasm32-unknown-unknown/release/`.
+`deploy_v3.sh` crea y fondea las identidades `nuup-admin` y `nuup-platform`, emite un asset de prueba `MXNE` (emisor = plataforma) y lo envuelve como SAC, despliega e inicializa los 4 contratos y autoriza a `EventContract`/`ProjectContract` en `ReputationLedger`. Las variables quedan en `soroban-contracts/.env.testnet`.
 
-#### Desplegar contratos (Linux / macOS)
+### 3. Backend (Node.js / Express)
 
 ```bash
-# Dar permisos al script
-chmod +x deploy.sh
-
-# Ejecutar despliegue completo
-./deploy.sh
+cd backend
+npm install
+cp .env.example .env
+cat ../soroban-contracts/.env.testnet >> .env   # IDs de contratos, MXNe y claves admin/plataforma
 ```
 
-El script compilará, desplegará e inicializará los 4 contratos en testnet y escribirá automáticamente el archivo `.env` con los IDs generados.
+Completa en `backend/.env` al menos:
 
-#### Desplegar contratos (Windows)
-
-```bat
-deploy.bat
-```
-
-#### Verificar un contrato desplegado
+| Variable | Valor local sugerido |
+|---|---|
+| `PORT` | `5050` (en macOS el 5000 lo ocupa AirPlay Receiver) |
+| `MONGO_URI` | `mongodb://localhost:27017/nuup` |
+| `JWT_SECRET` | `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `WALLET_ENCRYPTION_KEY` | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `VIBRANT_WEBHOOK_SECRET` | cualquier secreto (los webhooks se firman con HMAC-SHA256) |
+| `RESEND_API_KEY` | opcional; vacío = no se envían emails (solo warning en logs) |
 
 ```bash
-stellar contract invoke \
-  --id <REPUTATION_CONTRACT_ID> \
-  --source admin \
-  --network testnet \
-  -- get_admin
+npm run bootstrap         # categorías + admin (admin@nuup.local / Admin12345!)
+npm run search:index      # índice de búsqueda de freelancers
+npm run dev               # http://localhost:5050
+npm test                  # tests de cifrado de wallets
 ```
+
+En testnet, cada wallet nueva se fondea con Friendbot y abre trustline a MXNe automáticamente.
+
+### 4. Frontend (Next.js)
+
+```bash
+cd frontend
+npm install
+echo "NEXT_PUBLIC_API_URL=http://localhost:5050/api" > .env.local
+npm run dev               # http://localhost:3001
+```
+
+### Simular un depósito SPEI (Vibrant sandbox)
+
+Sin `VIBRANT_API_KEY` el backend genera una CLABE simulada. Para confirmar el depósito:
+
+```bash
+cd backend
+npm run simulate:deposit -- <referencia NUUP-...> <monto>
+```
+
+Envía un webhook `deposit.confirmed` firmado; el backend acredita MXNe on-chain a la wallet del usuario. Reenviarlo no acredita dos veces.
 
 ---
 
@@ -332,10 +299,11 @@ Documentación detallada en [`soroban-contracts/contract.docs.md`](./soroban-con
 
 | Contrato | ID | Descripción |
 |---|---|---|
-| `ReputationLedger` | Ver `.env` | Fuente única de verdad para reputación on-chain |
-| `EventContract` | Ver `.env` | Gestión de competencias con escrow |
-| `ProjectContract` | Ver `.env` | Proyectos 1:1 con escrow y ciclo de vida completo |
-| `WalletRegistry` | Ver `.env` | Registro de identidad on-chain de usuarios |
+| `ReputationLedger` | `CCSFFRT3E777ZDEUC5Z6GF7QRFXJE33RNRPVTRKMNFH5YHB7DVYZYDOT` | Fuente única de verdad para reputación on-chain |
+| `EventContract` | `CDSDLNQ22RM2MEAPGWDZRROLFEOFNIX763OXKBYNSLLDXYLRVBGOXRFR` | Gestión de competencias con escrow |
+| `ProjectContract` | `CB7RXH7FA7SIVIR44YSI6AQTJFY7A7747S7HSZ54OKHTHPQRUXRICKNW` | Proyectos 1:1 con escrow y ciclo de vida completo |
+| `WalletRegistry` | `CDVBEW6ICFL4RDABN43YDKOWK4WDWHB2OY3LPJB2KU63PG5MCHYD6UOQ` | Registro de identidad on-chain de usuarios |
+| MXNe (SAC de prueba) | `CAWFXP3RCR6AGNNU2GTCI4LO7BDSJQK2XJYDS7OVELDQ6J7CEJOQBQJB` | Token de escrow; emisor `GCPFXS2YA63EB7Q72ORURBMVZFWGHE2XNNF3W3QFN7M72R6CRGTM67VP` |
 
 ### Resumen de contratos
 
