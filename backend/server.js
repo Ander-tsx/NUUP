@@ -49,7 +49,14 @@ app.use((req, res, next) => {
 
 
 // ── Body parsers (after CORS) ──
-app.use(express.json());
+app.use(
+  express.json({
+    // Keep raw bytes for webhook HMAC verification (Vibrant)
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(cookieParser());
 
 app.use('/api', apiLimiter);

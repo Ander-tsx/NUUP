@@ -20,6 +20,9 @@ router.get('/transactions', verifyToken, getTransactions);
 router.get('/escrows', verifyToken, getEscrows);
 router.post('/deposit', verifyToken, depositFunds);
 router.post('/withdraw', verifyToken, withdrawFunds);
+// Vibrant webhooks: no JWT, authenticated by HMAC over the raw body.
+// server.js keeps the raw bytes in req.rawBody while parsing JSON.
+router.post('/vibrant-webhook', handleVibrantWebhook);
 router.post('/vibrant/webhook', handleVibrantWebhook);
 
 module.exports = router;
