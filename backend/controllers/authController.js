@@ -96,11 +96,11 @@ const register = async (req, res) => {
     });
     await wallet.save();
 
-    // Emitir JWT
+    // Emitir JWT — access token short-lived (15m); refresh token handles long-term sessions
     const accessToken = jwt.sign(
       { id: newUser._id, publicKey: stellarPublicKey, role: newUser.role },
       process.env.JWT_SECRET || "fallback_secret",
-      { expiresIn: "7d" },
+      { expiresIn: "15m" },
     );
 
     res.status(201).json({
@@ -167,16 +167,23 @@ const login = async (req, res) => {
       }
     }
 
-    // Emitir JWT
+    // Emitir JWT — access token short-lived (15m); refresh token handles long-term sessions
     const accessToken = jwt.sign(
       { id: user._id, publicKey: user.stellar_public_key, role: user.role },
       process.env.JWT_SECRET || "fallback_secret",
-      { expiresIn: "7d" },
+      { expiresIn: "15m" },
     );
 
     const refreshTokenString = crypto.randomBytes(40).toString("hex");
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    // Enforce max 5 active sessions — evict the oldest if at the limit
+    const activeSessions = await Session.find({ user_id: user._id }).sort({
+      created_at: 1,
+    });
+    if (activeSessions.length >= 5) {
+      await Session.deleteOne({ _id: activeSessions[0]._id });
+    }
 
     const session = new Session({
       user_id: user._id,
@@ -230,6 +237,9 @@ const logout = async (req, res) => {
 
 /**
  * POST /auth/refresh
+ * Refresh token rotation: the submitted token is deleted and a brand-new
+ * refresh token + access token pair is issued. A replayed (already-used)
+ * token returns 403 immediately.
  */
 const refresh = async (req, res) => {
   const refreshToken = req.cookies.refreshToken;
@@ -237,25 +247,73 @@ const refresh = async (req, res) => {
 
   const session = await Session.findOne({ refresh_token: refreshToken });
   if (!session || session.expires_at < new Date()) {
+    // Token not found or expired — could be a replay attempt; clear cookies
+    res
+      .clearCookie("accessToken", { sameSite: "none", secure: true })
+      .clearCookie("refreshToken", { sameSite: "none", secure: true });
     return res.status(403).json({ error: "Token inválido o expirado." });
   }
+
+  // Invalidate the used session immediately — one-time use
+  await Session.deleteOne({ _id: session._id });
 
   const user = await User.findById(session.user_id);
   if (!user) return res.status(403).json({ error: "Usuario no encontrado." });
 
-  const accessToken = jwt.sign(
+  // Issue new short-lived access token
+  const newAccessToken = jwt.sign(
     { id: user._id, publicKey: user.stellar_public_key, role: user.role },
     process.env.JWT_SECRET || "fallback_secret",
-    { expiresIn: "7d" },
+    { expiresIn: "15m" },
   );
 
+  // Issue new refresh token and persist new session
+  const newRefreshToken = crypto.randomBytes(40).toString("hex");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await Session.create({
+    user_id: user._id,
+    refresh_token: newRefreshToken,
+    user_agent: req.headers["user-agent"],
+    ip_address: req.ip,
+    expires_at: expiresAt,
+  });
+
   res
-    .cookie("accessToken", accessToken, {
+    .cookie("accessToken", newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    })
+    .cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
     })
     .status(200)
-    .json({ success: true, data: { message: "Token renovado." } });
+    .json({
+      success: true,
+      data: { token: newAccessToken, message: "Token renovado." },
+    });
 };
 
-module.exports = { register, login, logout, refresh };
+/**
+ * POST /auth/logout-all
+ * Deletes every active session for the authenticated user — signs out all devices.
+ * Requires a valid access token (verifyToken middleware applied in the route).
+ */
+const logoutAll = async (req, res) => {
+  try {
+    await Session.deleteMany({ user_id: req.userId });
+    res
+      .clearCookie("accessToken", { sameSite: "none", secure: true })
+      .clearCookie("refreshToken", { sameSite: "none", secure: true })
+      .status(200)
+      .json({
+        success: true,
+        data: { message: "Todas las sesiones cerradas." },
+      });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { register, login, logout, refresh, logoutAll };

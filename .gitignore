@@ -36,3 +36,4 @@ migrations/
 .env
 .env.*
 !.env.example
+*.tsbuildinfo

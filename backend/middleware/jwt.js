@@ -10,7 +10,8 @@ const verifyToken = (req, res, next) => {
   if (!token) return res.status(401).json({ message: "You are not authenticated!" });
 
   jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', async (err, payload) => {
-    if (err) return res.status(403).json({ message: "Token is not valid!" });
+    // 401 lets the client know it should rotate its refresh token and retry
+    if (err) return res.status(401).json({ message: "Token is not valid!" });
     req.userId = payload.id;
     req.role = payload.role;
     next();
