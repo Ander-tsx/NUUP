@@ -50,6 +50,22 @@ impl ReputationLedger {
 
     // ── Helpers internos ────────────────────────────────────────────────
 
+    /// Admin or a contract registered via `authorize_contract` (EventContract,
+    /// ProjectContract). A contract's own address is authorized implicitly when
+    /// it is the direct invoker, so no admin signature is needed in those txs.
+    fn require_admin_or_authorized(env: &Env, caller: &Address) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let authorized: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Authorized(caller.clone()))
+            .unwrap_or(false);
+        if *caller != admin && !authorized {
+            panic!("only admin or authorized contracts can modify reputation");
+        }
+    }
+
     /// Verifica que la wallet esté registrada y activa en WalletRegistry.
     /// Se llama antes de cualquier modificación de reputación.
     fn require_registered_wallet(env: &Env, wallet: &Address) {
@@ -93,13 +109,9 @@ impl ReputationLedger {
 
     /// Incrementa la reputación de una wallet en una categoría.
     /// Valida que la wallet esté registrada y activa en WalletRegistry antes de operar.
-    /// Solo el admin puede llamar esta función.
+    /// Solo el admin o un contrato autorizado puede llamar esta función.
     pub fn add_reputation(env: Env, caller: Address, user: Address, category: Symbol, delta: u32) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        caller.require_auth();
-        if caller != admin {
-            panic!("only admin can add reputation");
-        }
+        Self::require_admin_or_authorized(&env, &caller);
 
         // Verificar que la wallet existe y está activa antes de acreditar reputación
         Self::require_registered_wallet(&env, &user);
@@ -112,11 +124,7 @@ impl ReputationLedger {
     /// Reduce la reputación de una wallet en una categoría.
     /// Valida registro y actividad. Solo el admin puede llamar esta función.
     pub fn remove_reputation(env: Env, caller: Address, user: Address, category: Symbol, delta: u32) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        caller.require_auth();
-        if caller != admin {
-            panic!("only admin can remove reputation");
-        }
+        Self::require_admin_or_authorized(&env, &caller);
 
         Self::require_registered_wallet(&env, &user);
 

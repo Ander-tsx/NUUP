@@ -9,6 +9,63 @@ use soroban_sdk::{
 use crate::{EventContract, EventContractClient, EventStatus};
 use reputation_ledger::{ReputationLedger, ReputationLedgerClient};
 
+// ─── WalletRegistry mock ─────────────────────────────────────────────────────
+// Mirrors the cross-contract interface of wallet_registry: every wallet is
+// active and a Freelancer unless it was registered as Recruiter or deactivated.
+
+mod mock_registry {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    #[derive(Clone, PartialEq, Debug)]
+    #[contracttype]
+    pub enum UserRole {
+        Recruiter,
+        Freelancer,
+    }
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum Key {
+        Recruiter(Address),
+        Inactive(Address),
+    }
+
+    #[contract]
+    pub struct MockRegistry;
+
+    #[contractimpl]
+    impl MockRegistry {
+        pub fn set_recruiter(env: Env, wallet: Address) {
+            env.storage().persistent().set(&Key::Recruiter(wallet), &true);
+        }
+
+        pub fn deactivate(env: Env, wallet: Address) {
+            env.storage().persistent().set(&Key::Inactive(wallet), &true);
+        }
+
+        pub fn is_active_by_wallet(env: Env, wallet: Address) -> bool {
+            !env.storage().persistent().has(&Key::Inactive(wallet))
+        }
+
+        pub fn get_role_by_wallet(env: Env, wallet: Address) -> UserRole {
+            if env.storage().persistent().has(&Key::Recruiter(wallet)) {
+                UserRole::Recruiter
+            } else {
+                UserRole::Freelancer
+            }
+        }
+    }
+}
+
+use mock_registry::{MockRegistry, MockRegistryClient};
+
+/// Registers the registry mock and marks `recruiter` with the Recruiter role.
+fn register_registry(env: &Env, recruiter: &Address) -> Address {
+    let registry = env.register_contract(None, MockRegistry);
+    MockRegistryClient::new(env, &registry).set_recruiter(recruiter);
+    registry
+}
+
 // ─── Constantes de tiempo ─────────────────────────────────────────────────────
 
 const T_NOW: u64 = 1_000_000;
@@ -41,11 +98,17 @@ fn setup() -> (Env, EventContractClient<'static>, Address, Address, Address, Add
 
     let admin = Address::generate(&env);
     let platform = Address::generate(&env);
-    let reputation = Address::generate(&env); // stub para unit tests
 
     let contract_id = env.register_contract(None, EventContract);
     let client = EventContractClient::new(&env, &contract_id);
-    client.initialize(&admin, &token_addr, &reputation, &platform);
+    let registry = register_registry(&env, &admin);
+
+    // select_winners acredita reputación vía cross-contract call
+    let reputation = env.register_contract(None, ReputationLedger);
+    let reputation_client = ReputationLedgerClient::new(&env, &reputation);
+    reputation_client.initialize(&admin, &registry);
+    reputation_client.authorize_contract(&contract_id);
+    client.initialize(&admin, &token_addr, &reputation, &platform, &registry);
 
     (env, client, token_addr, reputation, admin, platform)
 }
@@ -128,7 +191,7 @@ fn test_initialize_allows_event_creation() {
 #[should_panic(expected = "already initialized")]
 fn test_initialize_twice_panics() {
     let (env, client, token, reputation, admin, platform) = setup();
-    client.initialize(&admin, &token, &reputation, &platform);
+    client.initialize(&admin, &token, &reputation, &platform, &platform);
 }
 
 // ─── create_event ────────────────────────────────────────────────────────────
@@ -178,7 +241,13 @@ fn test_create_event_transfers_prize_to_escrow() {
     let token_client = TokenClient::new(&env, &token);
 
     let before = token_client.balance(&recruiter);
-    create_default_event(&env, &client, &token, &recruiter);
+    client.create_event(
+        &recruiter,
+        &1_000_000i128,
+        &Symbol::new(&env, "design"),
+        &T_SUBMIT,
+        &T_SELECT,
+    );
     let after = token_client.balance(&recruiter);
 
     assert_eq!(before - after, 1_000_000);
@@ -720,12 +789,11 @@ fn test_two_events_are_independent() {
 }
 
 #[test]
+#[should_panic(expected = "wallet does not have the required role for this operation")]
 fn test_recruiter_cannot_apply_own_event_as_separate_user() {
     let (env, client, token, _, recruiter, _) = setup();
     let id = create_default_event(&env, &client, &token, &recruiter);
 
-    // El contrato no impide que el reclutador aplique como freelancer —
-    // verificamos que la lógica lo permite (decisión de producto, no bug de seguridad)
+    // WalletRegistry assigns the Recruiter role, so applying as participant is rejected
     client.apply_to_event(&id, &recruiter);
-    assert_eq!(client.get_event(&id).applicants.len(), 1);
 }

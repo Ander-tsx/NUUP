@@ -8,6 +8,61 @@ use soroban_sdk::{
 
 use crate::{ReputationLedger, ReputationLedgerClient};
 
+// ─── WalletRegistry mock ─────────────────────────────────────────────────────
+// Mirrors the cross-contract interface of wallet_registry: every wallet is
+// active and a Freelancer unless it was registered as Recruiter or deactivated.
+
+mod mock_registry {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    #[derive(Clone, PartialEq, Debug)]
+    #[contracttype]
+    pub enum UserRole {
+        Recruiter,
+        Freelancer,
+    }
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum Key {
+        Recruiter(Address),
+        Inactive(Address),
+    }
+
+    #[contract]
+    pub struct MockRegistry;
+
+    #[contractimpl]
+    impl MockRegistry {
+        pub fn set_recruiter(env: Env, wallet: Address) {
+            env.storage().persistent().set(&Key::Recruiter(wallet), &true);
+        }
+
+        pub fn deactivate(env: Env, wallet: Address) {
+            env.storage().persistent().set(&Key::Inactive(wallet), &true);
+        }
+
+        pub fn is_active_by_wallet(env: Env, wallet: Address) -> bool {
+            !env.storage().persistent().has(&Key::Inactive(wallet))
+        }
+
+        pub fn get_role_by_wallet(env: Env, wallet: Address) -> UserRole {
+            if env.storage().persistent().has(&Key::Recruiter(wallet)) {
+                UserRole::Recruiter
+            } else {
+                UserRole::Freelancer
+            }
+        }
+    }
+}
+
+use mock_registry::{MockRegistry, MockRegistryClient};
+
+/// Registers the registry mock.
+fn register_registry(env: &Env) -> Address {
+    env.register_contract(None, MockRegistry)
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Registra el contrato y retorna (client, admin).
@@ -18,7 +73,7 @@ fn setup(env: &Env) -> (ReputationLedgerClient, Address) {
     let admin = Address::generate(env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(env));
 
     (client, admin)
 }
@@ -49,7 +104,7 @@ fn test_initialize_twice_panics() {
     let (client, admin) = setup(&env);
 
     // Segunda llamada debe hacer panic
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 }
 
 #[test]
@@ -60,7 +115,7 @@ fn test_initialize_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     // Verificar que se exigió auth del admin
     let auths = env.auths();
@@ -98,7 +153,7 @@ fn test_authorize_contract_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     let external_contract = Address::generate(&env);
     client.authorize_contract(&external_contract);
@@ -220,7 +275,7 @@ fn test_add_reputation_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     let user = Address::generate(&env);
     let category = cat_design(&env);
@@ -233,7 +288,7 @@ fn test_add_reputation_requires_admin_auth() {
 }
 
 #[test]
-#[should_panic(expected = "only admin can add reputation")]
+#[should_panic(expected = "only admin or authorized contracts can modify reputation")]
 fn test_add_reputation_non_admin_panics() {
     let env = Env::default();
     let (client, _admin) = setup(&env);
@@ -284,7 +339,7 @@ fn test_remove_reputation_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     let user = Address::generate(&env);
     let category = cat_design(&env);
@@ -297,7 +352,7 @@ fn test_remove_reputation_requires_admin_auth() {
 }
 
 #[test]
-#[should_panic(expected = "only admin can remove reputation")]
+#[should_panic(expected = "only admin or authorized contracts can modify reputation")]
 fn test_remove_reputation_non_admin_panics() {
     let env = Env::default();
     let (client, _admin) = setup(&env);
@@ -356,7 +411,7 @@ fn test_shadowban_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     let user = Address::generate(&env);
     client.shadowban(&admin, &user);
@@ -414,7 +469,7 @@ fn test_unban_requires_admin_auth() {
     let admin = Address::generate(&env);
 
     env.mock_all_auths();
-    client.initialize(&admin);
+    client.initialize(&admin, &register_registry(&env));
 
     let user = Address::generate(&env);
     client.shadowban(&admin, &user);

@@ -31,6 +31,16 @@ pub struct ProjectData {
     pub category: Symbol,
 }
 
+/// Mirror of wallet_registry::UserRole. Unit enum variants are encoded as
+/// `Vec[Symbol(variant)]`, so the registry response must be decoded into an
+/// enum with the same variants — decoding it as a bare `Symbol` fails.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub enum RegistryRole {
+    Recruiter,
+    Freelancer,
+}
+
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -103,20 +113,20 @@ impl ProjectContract {
     }
 
     /// Verifica que una wallet tenga el rol esperado.
-    fn require_role(env: &Env, wallet: &Address, expected_role_tag: &str) {
+    fn require_role(env: &Env, wallet: &Address, expected_role: RegistryRole) {
         let registry_addr: Address = env
             .storage()
             .instance()
             .get(&DataKey::WalletRegistryAddr)
             .unwrap();
 
-        let role_val: Symbol = env.invoke_contract(
+        let role: RegistryRole = env.invoke_contract(
             &registry_addr,
             &Symbol::new(env, "get_role_by_wallet"),
             (wallet.clone(),).into_val(env),
         );
 
-        if role_val != Symbol::new(env, expected_role_tag) {
+        if role != expected_role {
             panic!("wallet does not have the required role for this operation");
         }
     }
@@ -128,12 +138,11 @@ impl ProjectContract {
             .instance()
             .get(&DataKey::ReputationAddr)
             .unwrap();
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-
+        // This contract must be registered with ReputationLedger.authorize_contract
         env.invoke_contract::<()>(
             &reputation_addr,
             &Symbol::new(env, "add_reputation"),
-            (admin, user.clone(), category.clone(), delta).into_val(env),
+            (env.current_contract_address(), user.clone(), category.clone(), delta).into_val(env),
         );
     }
 
@@ -155,11 +164,11 @@ impl ProjectContract {
 
         // Validar reclutador: debe existir, estar activo y tener rol Recruiter
         Self::require_active_wallet(&env, &recruiter);
-        Self::require_role(&env, &recruiter, "Recruiter");
+        Self::require_role(&env, &recruiter, RegistryRole::Recruiter);
 
         // Validar freelancer: debe existir, estar activo y tener rol Freelancer
         Self::require_active_wallet(&env, &freelancer);
-        Self::require_role(&env, &freelancer, "Freelancer");
+        Self::require_role(&env, &freelancer, RegistryRole::Freelancer);
 
         if amount <= 0 {
             panic!("amount must be positive");

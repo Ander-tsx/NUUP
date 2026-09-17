@@ -26,6 +26,16 @@ pub struct EventData {
     pub submissions: Map<Address, BytesN<32>>,
 }
 
+/// Mirror of wallet_registry::UserRole. Unit enum variants are encoded as
+/// `Vec[Symbol(variant)]`, so the registry response must be decoded into an
+/// enum with the same variants — decoding it as a bare `Symbol` fails.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub enum RegistryRole {
+    Recruiter,
+    Freelancer,
+}
+
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -101,21 +111,20 @@ impl EventContract {
 
     /// Verifica que una wallet tenga el rol esperado en WalletRegistry.
     /// Evita que un freelancer cree eventos o que un reclutador aplique como participante.
-    fn require_role(env: &Env, wallet: &Address, expected_role_tag: &str) {
+    fn require_role(env: &Env, wallet: &Address, expected_role: RegistryRole) {
         let registry_addr: Address = env
             .storage()
             .instance()
             .get(&DataKey::WalletRegistryAddr)
             .unwrap();
 
-        // get_role_by_wallet retorna un ScVal enum — comparamos el tag como Symbol
-        let role_val: Symbol = env.invoke_contract(
+                let role: RegistryRole = env.invoke_contract(
             &registry_addr,
             &Symbol::new(env, "get_role_by_wallet"),
             (wallet.clone(),).into_val(env),
         );
 
-        if role_val != Symbol::new(env, expected_role_tag) {
+        if role != expected_role {
             panic!("wallet does not have the required role for this operation");
         }
     }
@@ -136,7 +145,7 @@ impl EventContract {
 
         // Validar que el reclutador sea un usuario activo registrado con rol correcto
         Self::require_active_wallet(&env, &recruiter);
-        Self::require_role(&env, &recruiter, "Recruiter");
+        Self::require_role(&env, &recruiter, RegistryRole::Recruiter);
 
         if prize <= 0 {
             panic!("prize must be positive");
@@ -176,7 +185,7 @@ impl EventContract {
 
         // Validar que el freelancer sea un usuario activo con rol correcto
         Self::require_active_wallet(&env, &freelancer);
-        Self::require_role(&env, &freelancer, "Freelancer");
+        Self::require_role(&env, &freelancer, RegistryRole::Freelancer);
 
         let mut event: EventData = env
             .storage()
@@ -288,7 +297,8 @@ impl EventContract {
         }
 
         let reputation_addr: Address = env.storage().instance().get(&DataKey::ReputationAddr).unwrap();
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        // This contract must be registered with ReputationLedger.authorize_contract
+        let caller = env.current_contract_address();
 
         let rep_delta: u32 = 10;
         for i in 0..winners.len() {
@@ -296,7 +306,7 @@ impl EventContract {
             env.invoke_contract::<()>(
                 &reputation_addr,
                 &Symbol::new(&env, "add_reputation"),
-                (admin.clone(), winner, event.category.clone(), rep_delta).into_val(&env),
+                (caller.clone(), winner, event.category.clone(), rep_delta).into_val(&env),
             );
         }
 
@@ -318,7 +328,7 @@ impl EventContract {
             env.invoke_contract::<()>(
                 &reputation_addr,
                 &Symbol::new(&env, "add_reputation"),
-                (admin.clone(), applicant, event.category.clone(), delta_rep_no_winners).into_val(&env),
+                (caller.clone(), applicant, event.category.clone(), delta_rep_no_winners).into_val(&env),
             );
         }
 
