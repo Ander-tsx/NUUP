@@ -292,7 +292,7 @@ const verifyCompany = async (req, res) => {
     const user = await User.findOneAndUpdate(
       { _id: req.params.id, role: "recruiter" },
       update,
-      { new: true },
+      { returnDocument: "after" },
     ).select("-password_hash");
 
     if (!user)

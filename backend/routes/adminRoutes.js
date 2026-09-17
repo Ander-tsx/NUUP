@@ -150,7 +150,7 @@ router.post("/backfill-reputation", async (req, res) => {
         await Reputation.findOneAndUpdate(
           { user_id: sub.freelancer_id, category_id: event.category_id },
           { $inc: { score: REP_EVENT }, $set: { level } },
-          { upsert: true, new: true },
+          { upsert: true, returnDocument: "after" },
         );
         await ReputationLog.create({
           user_id: sub.freelancer_id,
@@ -197,7 +197,7 @@ router.post("/backfill-reputation", async (req, res) => {
         await Reputation.findOneAndUpdate(
           { user_id: proj.freelancer_id, category_id: proj.category_id },
           { $inc: { score: REP_PROJECT }, $set: { level } },
-          { upsert: true, new: true },
+          { upsert: true, returnDocument: "after" },
         );
         await ReputationLog.create({
           user_id: proj.freelancer_id,
@@ -325,7 +325,7 @@ router.post("/seed-categories", async (req, res) => {
         Category.findOneAndUpdate(
           { name: cat.name },
           { $set: cat },
-          { upsert: true, new: true },
+          { upsert: true, returnDocument: "after" },
         ),
       ),
     );

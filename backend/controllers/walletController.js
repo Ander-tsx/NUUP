@@ -285,7 +285,7 @@ const handleVibrantWebhook = async (req, res) => {
       const tx = await Transaction.findOneAndUpdate(
         { type: "deposit", "metadata.reference": reference, status: "pending" },
         { $set: { status: "processing" } },
-        { new: true },
+        { returnDocument: "after" },
       );
       if (!tx) {
         const existing = await Transaction.findOne({

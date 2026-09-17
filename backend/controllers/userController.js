@@ -264,7 +264,7 @@ const updateProfile = async (req, res) => {
             "portfolio_url",
           ]),
         },
-        { new: true, runValidators: true },
+        { returnDocument: "after", runValidators: true },
       );
       await syncFreelancerSearchIndex(user._id);
       return res.status(200).json({ success: true, data: profile });
@@ -272,7 +272,7 @@ const updateProfile = async (req, res) => {
       const profile = await RecruiterProfile.findOneAndUpdate(
         { user_id: user._id },
         { $set: pick(["company_description", "website"]) },
-        { new: true },
+        { returnDocument: "after" },
       );
       return res.status(200).json({ success: true, data: profile });
     }
@@ -544,7 +544,7 @@ const updateCompanyProfile = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.userId,
       { $set: update },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).select("-password_hash");
 
     if (!user) return res.status(404).json({ error: "Usuario no encontrado." });

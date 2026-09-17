@@ -537,7 +537,7 @@ const approveDelivery = async (req, res) => {
         await Reputation.findOneAndUpdate(
           { user_id: project.freelancer_id, category_id: project.category_id },
           { $inc: { score: REP_DELTA }, $set: { level } },
-          { upsert: true, new: true },
+          { upsert: true, returnDocument: "after" },
         );
 
         await ReputationLog.create({

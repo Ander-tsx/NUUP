@@ -446,7 +446,7 @@ const selectWinner = async (req, res) => {
           await SearchIndexFreelancers.findOneAndUpdate(
             { user_id: submission.freelancer_id },
             updateOp,
-            { new: true },
+            { returnDocument: "after" },
           );
         } else {
           // Si por alguna razón no existe, lo creamos
@@ -495,7 +495,7 @@ const selectWinner = async (req, res) => {
               category_id: event.category_id,
             },
             { $inc: { score: REP_DELTA }, $set: { level } },
-            { upsert: true, new: true },
+            { upsert: true, returnDocument: "after" },
           );
 
           await ReputationLog.create({
