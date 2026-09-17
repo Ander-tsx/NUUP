@@ -4,6 +4,9 @@ const { createNotification } = require("../services/notificationService");
 const { validateCLABE } = require("../utils/validateCLABE");
 const vibrantService = require("../services/vibrantService");
 const { decryptSecret } = require("../services/cryptoService");
+const { sendEmail, loadTemplate } = require("../services/emailService");
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
 
 const MXNE_ASSET_CODE = process.env.MXNE_ASSET_CODE || "MXNE";
 const MXNE_ASSET_ISSUER = process.env.MXNE_ASSET_ISSUER;
@@ -131,6 +134,23 @@ const depositFunds = async (req, res) => {
       `Se depositaron ${amount_mxne} MXNe a tu wallet.`,
       transaction._id,
     );
+
+    // ── Email: deposit confirmed (critical — always send) ──
+    const depositor = await require("../models/User")
+      .findById(req.userId)
+      .select("email username");
+    if (depositor?.email) {
+      const html = loadTemplate("deposit-confirmed", {
+        recipientName: depositor.username || "Usuario",
+        amount: amount_mxne,
+        ctaUrl: `${FRONTEND_URL}/wallet`,
+      });
+      await sendEmail(
+        depositor.email,
+        `Depósito confirmado: ${amount_mxne} MXNe`,
+        html,
+      );
+    }
 
     res.status(201).json({
       message: "Deposit successful.",
@@ -274,6 +294,28 @@ const handleVibrantWebhook = async (req, res) => {
         "Tu retiro ha sido depositado en tu cuenta bancaria.",
         tx._id,
       );
+
+      // ── Email: withdrawal completed (critical — always send) ──
+      const withdrawUser = await require("../models/User")
+        .findById(tx.user_id)
+        .select("email username");
+      if (withdrawUser?.email) {
+        const clabeLast4 = String(
+          tx.metadata?.destination_clabe_last4 || "****",
+        );
+        const html = loadTemplate("withdraw-completed", {
+          recipientName: withdrawUser.username || "Usuario",
+          amount: tx.amount_mxn,
+          clabeLast4,
+          ctaUrl: `${FRONTEND_URL}/wallet`,
+        });
+        await sendEmail(
+          withdrawUser.email,
+          `Retiro completado: ${tx.amount_mxn} MXN en camino`,
+          html,
+        );
+      }
+
       return res.status(200).json({ success: true });
     }
 

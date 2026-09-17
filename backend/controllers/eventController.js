@@ -9,6 +9,9 @@ const crypto = require("crypto");
 const contracts = require("../contracts");
 const { createNotification } = require("../services/notificationService");
 const { decryptSecret } = require("../services/cryptoService");
+const { sendEmail, loadTemplate } = require("../services/emailService");
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
 
 /**
  * POST /events
@@ -262,6 +265,25 @@ const applyToEvent = async (req, res) => {
       `Un freelancer se ha registrado en tu evento "${event.title}".`,
       event._id,
     );
+
+    // ── Email: notify recruiter of new application (non-critical) ──
+    const recruiter = await User.findById(event.recruiter_id).select(
+      "email username email_notifications",
+    );
+    const applicant = await User.findById(req.userId).select("username");
+    if (recruiter?.email && recruiter.email_notifications !== false) {
+      const html = loadTemplate("event-application", {
+        recruiterName: recruiter.username || "Reclutador",
+        applicantName: applicant?.username || "Un freelancer",
+        eventTitle: event.title,
+        ctaUrl: `${FRONTEND_URL}/events/${event._id}`,
+      });
+      await sendEmail(
+        recruiter.email,
+        `Nueva aplicación a tu reto: ${event.title}`,
+        html,
+      );
+    }
 
     res.status(201).json({ success: true, data: participant });
   } catch (err) {
@@ -539,6 +561,22 @@ const selectWinner = async (req, res) => {
           `Has ganado "${event.title}" y recibiste ${prizePerWinner} XLM.`,
           event._id,
         );
+
+        // ── Email: notify winner (critical — always send) ──
+        const winner = await User.findById(winnerId).select("email username");
+        if (winner?.email) {
+          const html = loadTemplate("winner-selected", {
+            winnerName: winner.username || "Freelancer",
+            eventTitle: event.title,
+            prizeAmount: prizePerWinner.toFixed(2),
+            ctaUrl: `${FRONTEND_URL}/wallet`,
+          });
+          await sendEmail(
+            winner.email,
+            `¡Felicidades! Ganaste el reto: ${event.title}`,
+            html,
+          );
+        }
       }
 
       escrow.status = "released";

@@ -11,6 +11,9 @@ const crypto = require("crypto");
 const contracts = require("../contracts");
 const { createNotification } = require("../services/notificationService");
 const { decryptSecret } = require("../services/cryptoService");
+const { sendEmail, loadTemplate } = require("../services/emailService");
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
 
 /**
  * POST /projects
@@ -311,6 +314,25 @@ const acceptProject = async (req, res) => {
       project._id,
     );
 
+    // ── Email: notify recruiter (non-critical) ──
+    const recruiter = await User.findById(project.recruiter_id).select(
+      "email username email_notifications",
+    );
+    const freelancer = await User.findById(req.userId).select("username");
+    if (recruiter?.email && recruiter.email_notifications !== false) {
+      const html = loadTemplate("project-accepted", {
+        recruiterName: recruiter.username || "Reclutador",
+        freelancerName: freelancer?.username || "El freelancer",
+        projectTitle: project.title,
+        ctaUrl: `${FRONTEND_URL}/projects/${project._id}`,
+      });
+      await sendEmail(
+        recruiter.email,
+        `Tu propuesta fue aceptada: ${project.title}`,
+        html,
+      );
+    }
+
     res.status(200).json({
       success: true,
       data: { message: "Proyecto aceptado.", project },
@@ -376,6 +398,25 @@ const deliverProject = async (req, res) => {
       `El freelancer entregó su trabajo para "${project.title}".`,
       project._id,
     );
+
+    // ── Email: notify recruiter of delivery (non-critical) ──
+    const recruiter = await User.findById(project.recruiter_id).select(
+      "email username email_notifications",
+    );
+    const freelancer = await User.findById(req.userId).select("username");
+    if (recruiter?.email && recruiter.email_notifications !== false) {
+      const html = loadTemplate("project-delivered", {
+        recruiterName: recruiter.username || "Reclutador",
+        freelancerName: freelancer?.username || "El freelancer",
+        projectTitle: project.title,
+        ctaUrl: `${FRONTEND_URL}/projects/${project._id}`,
+      });
+      await sendEmail(
+        recruiter.email,
+        `Entrega recibida en: ${project.title}`,
+        html,
+      );
+    }
 
     res.status(201).json({ success: true, data: { delivery, deliveryHash } });
   } catch (err) {
@@ -534,6 +575,25 @@ const approveDelivery = async (req, res) => {
       `Tu trabajo en "${project.title}" fue aprobado. Fondos liberados.`,
       project._id,
     );
+
+    // ── Email: notify freelancer of payout (critical — always send) ──
+    const freelancerUser = await User.findById(project.freelancer_id).select(
+      "email username",
+    );
+    if (freelancerUser?.email) {
+      const payoutAmount = escrow ? (escrow.amount * 0.9).toFixed(2) : "0";
+      const html = loadTemplate("project-approved", {
+        freelancerName: freelancerUser.username || "Freelancer",
+        projectTitle: project.title,
+        payoutAmount,
+        ctaUrl: `${FRONTEND_URL}/wallet`,
+      });
+      await sendEmail(
+        freelancerUser.email,
+        `¡Proyecto completado! Pago liberado`,
+        html,
+      );
+    }
 
     res.status(200).json({
       success: true,
